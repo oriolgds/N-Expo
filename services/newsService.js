@@ -12,21 +12,21 @@ const BASE_URL = 'https://newsapi.org/v2';
  * @returns {Promise} - Datos de las noticias
  */
 export const getTopHeadlines = async (country = 'es', category = '', page = 1) => {
-  try {
-    const response = await axios.get(`${BASE_URL}/top-headlines`, {
-      params: {
-        country,
-        category,
-        page,
-        pageSize: 20,
-        apiKey: API_KEY,
-      },
-    });
-    return response.data;
-  } catch (error) {
-    console.error('Error al obtener noticias destacadas:', error);
-    throw error;
-  }
+    try {
+        const response = await axios.get(`${BASE_URL}/top-headlines`, {
+            params: {
+                country,
+                category,
+                page,
+                pageSize: 20,
+                apiKey: API_KEY,
+            },
+        });
+        return response.data;
+    } catch (error) {
+        console.error('Error al obtener noticias destacadas:', error);
+        throw error;
+    }
 };
 
 /**
@@ -36,22 +36,22 @@ export const getTopHeadlines = async (country = 'es', category = '', page = 1) =
  * @returns {Promise} - Resultados de la búsqueda
  */
 export const searchNews = async (query, page = 1) => {
-  try {
-    const response = await axios.get(`${BASE_URL}/everything`, {
-      params: {
-        q: query,
-        page,
-        pageSize: 20,
-        language: 'es', // Configura el idioma según necesites
-        sortBy: 'publishedAt',
-        apiKey: API_KEY,
-      },
-    });
-    return response.data;
-  } catch (error) {
-    console.error('Error al buscar noticias:', error);
-    throw error;
-  }
+    try {
+        const response = await axios.get(`${BASE_URL}/everything`, {
+            params: {
+                q: query,
+                page,
+                pageSize: 20,
+                language: 'es', // Configura el idioma según necesites
+                sortBy: 'publishedAt',
+                apiKey: API_KEY,
+            },
+        });
+        return response.data;
+    } catch (error) {
+        console.error('Error al buscar noticias:', error);
+        throw error;
+    }
 };
 
 /**
@@ -61,20 +61,20 @@ export const searchNews = async (query, page = 1) => {
  * @returns {Promise} - Datos de las noticias
  */
 export const getNewsBySource = async (sources, page = 1) => {
-  try {
-    const response = await axios.get(`${BASE_URL}/everything`, {
-      params: {
-        sources,
-        page,
-        pageSize: 20,
-        apiKey: API_KEY,
-      },
-    });
-    return response.data;
-  } catch (error) {
-    console.error('Error al obtener noticias por fuente:', error);
-    throw error;
-  }
+    try {
+        const response = await axios.get(`${BASE_URL}/everything`, {
+            params: {
+                sources,
+                page,
+                pageSize: 20,
+                apiKey: API_KEY,
+            },
+        });
+        return response.data;
+    } catch (error) {
+        console.error('Error al obtener noticias por fuente:', error);
+        throw error;
+    }
 };
 
 /**
@@ -84,17 +84,17 @@ export const getNewsBySource = async (sources, page = 1) => {
  * @returns {Promise} - Lista de fuentes disponibles
  */
 export const getSources = async (category = '', language = 'es') => {
-  try {
-    const response = await axios.get(`${BASE_URL}/sources`, {
-      params: {
-        category,
-        language,
-        apiKey: API_KEY,
-      },
-    });
-    return response.data;
-  } catch (error) {
-    console.error('Error al obtener fuentes:', error);
-    throw error;
-  }
+    try {
+        const response = await axios.get(`${BASE_URL}/sources`, {
+            params: {
+                category,
+                language,
+                apiKey: API_KEY,
+            },
+        });
+        return response.data;
+    } catch (error) {
+        console.error('Error al obtener fuentes:', error);
+        throw error;
+    }
 };

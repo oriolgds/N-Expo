@@ -74,9 +74,12 @@ jarjar-rules.txt
 /android/app/src/androidTest/java/host/exp/exponent/generated/TestBuildConstants.java
 .kernel-ngrok-url
 
+
 # Template files
 /android/app/src/main/AndroidManifest.xml
 /android/app/google-services.json
+/android/
+/ios/
 /android/expoview/src/main/java/host/exp/exponent/generated/ExponentKeys.java
 /apps/bare-expo/android/app/google-services.json
 /apps/bare-expo/ios/BareExpo/GoogleService-Info.plist
