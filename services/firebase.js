@@ -58,11 +58,13 @@ try {
 
   // Inicializa Auth con persistencia para React Native
   try {
-    console.log("Inicializando Firebase Auth...");
-    auth = getAuth(app);
-    console.log("Firebase Auth inicializado correctamente.");
+    console.log("Inicializando Firebase Auth con persistencia...");
+    auth = initializeAuth(app, {
+      persistence: getReactNativePersistence(AsyncStorage)
+    });
+    console.log("Firebase Auth inicializado correctamente con persistencia.");
   } catch (authError) {
-    console.error("Error al inicializar Firebase Auth:", authError);
+    console.error("Error al inicializar Firebase Auth con persistencia:", authError);
     // Intentar inicializar sin personalización como último recurso
     try {
       console.log("Intentando inicialización alternativa de Auth...");
