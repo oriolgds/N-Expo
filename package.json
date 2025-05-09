@@ -4,9 +4,20 @@
   "main": "index.js",
   "scripts": {
     "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
-    "web": "expo start --web"
+    "reset-project": "node ./scripts/reset-project.js",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "web": "expo start --web",
+    "test": "jest --watchAll",
+    "lint": "expo lint",
+    "clean": "expo prebuild --clean",
+    "build:android": "eas build --platform android --profile production",
+    "build:android-local": "eas build --platform android --profile production --local",
+    "workflow:run": "npx eas-cli workflow:run",
+    "workflow:android": "npx eas-cli workflow:run .eas/workflows/android-build.yml",
+    "predeploy": "expo export",
+    "deploy": "gh-pages -d dist",
+    "full-deploy": "npm run predeploy && npm run deploy"
   },
   "dependencies": {
     "@expo/vector-icons": "^14.1.0",
@@ -25,7 +36,8 @@
     "react-native-reanimated": "^3.17.5",
     "react-native-safe-area-context": "^5.4.0",
     "react-native-screens": "^4.10.0",
-    "react-native-vector-icons": "^10.2.0"
+    "react-native-vector-icons": "^10.2.0",
+    "expo-dev-client": "~5.1.8"
   },
   "devDependencies": {
     "@babel/core": "^7.20.0"
