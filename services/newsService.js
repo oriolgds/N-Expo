@@ -1,7 +1,8 @@
 import axios from 'axios';
+import Constants from 'expo-constants';
 
 // Configuración de la API
-const API_KEY = 'ba82b8ff860c435880ddd0f7bf393dd3';
+const API_KEY = Constants.expoConfig.extra.NEWS_API_KEY;
 const BASE_URL = 'https://newsapi.org/v2';
 
 /**
