@@ -1,8 +1,8 @@
 import { initializeApp } from 'firebase/app';
-import { 
+import {
   initializeAuth,
   getAuth,
-  getReactNativePersistence, 
+  getReactNativePersistence,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
@@ -27,8 +27,8 @@ const getFirebaseConfig = () => {
       appId: Constants.expoConfig.extra.FIREBASE_APP_ID,
       measurementId: Constants.expoConfig.extra.FIREBASE_MEASUREMENT_ID
     };
-  } 
-  
+  }
+
   // Fallback a las variables de entorno directamente
   return {
     apiKey: process.env.FIREBASE_API_KEY,
@@ -55,7 +55,7 @@ try {
   console.log("Inicializando Firebase App...");
   app = initializeApp(firebaseConfig);
   console.log("Firebase App inicializado correctamente.");
-  
+
   // Inicializa Auth con persistencia para React Native
   try {
     console.log("Inicializando Firebase Auth...");
@@ -108,15 +108,15 @@ export const registerUser = async (email, password, username) => {
   if (!auth) {
     throw new Error("Firebase Auth no está inicializado correctamente");
   }
-  
+
   try {
     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-    
+
     // Update profile with username
     await updateProfile(userCredential.user, {
       displayName: username
     });
-    
+
     // Save additional user data in Firestore
     await setDoc(doc(db, "users", userCredential.user.uid), {
       username,
@@ -125,7 +125,7 @@ export const registerUser = async (email, password, username) => {
       likes: [],
       comments: []
     });
-    
+
     return userCredential.user;
   } catch (error) {
     console.error("Registration error:", error);
@@ -138,7 +138,7 @@ export const loginUser = async (email, password) => {
   if (!auth) {
     throw new Error("Firebase Auth no está inicializado correctamente");
   }
-  
+
   try {
     const userCredential = await signInWithEmailAndPassword(auth, email, password);
     return userCredential.user;
@@ -153,7 +153,7 @@ export const logoutUser = async () => {
   if (!auth) {
     throw new Error("Firebase Auth no está inicializado correctamente");
   }
-  
+
   try {
     await signOut(auth);
   } catch (error) {
@@ -175,7 +175,7 @@ export const subscribeToAuthChanges = (callback) => {
   // Verificar que auth esté inicializado
   if (!auth) {
     console.warn("Firebase Auth no está inicializado correctamente");
-    return () => {}; // Retornar una función vacía como unsubscribe
+    return () => { }; // Retornar una función vacía como unsubscribe
   }
   return onAuthStateChanged(auth, callback);
 };
@@ -186,7 +186,7 @@ export const getUserData = async (userId) => {
   if (!db) {
     throw new Error("Firestore no está inicializado correctamente");
   }
-  
+
   try {
     const userDoc = await getDoc(doc(db, "users", userId));
     if (userDoc.exists()) {

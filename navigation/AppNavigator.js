@@ -61,19 +61,19 @@ const HomeStack = () => {
         },
       })}
     >
-      <Tab.Screen 
-        name="Home" 
-        component={HomeScreen} 
+      <Tab.Screen
+        name="Home"
+        component={HomeScreen}
         options={{ title: 'Noticias' }}
       />
-      <Tab.Screen 
-        name="Search" 
-        component={SearchScreen} 
+      <Tab.Screen
+        name="Search"
+        component={SearchScreen}
         options={{ title: 'Buscar' }}
       />
-      <Tab.Screen 
-        name="Profile" 
-        component={ProfileScreen} 
+      <Tab.Screen
+        name="Profile"
+        component={ProfileScreen}
         options={{ title: 'Perfil' }}
       />
     </Tab.Navigator>
@@ -90,7 +90,7 @@ const AppNavigator = () => {
       console.warn('Auth object is not initialized yet');
       return;
     }
-    
+
     const unsubscribe = subscribeToAuthChanges((currentUser) => {
       setUser(currentUser);
       if (initializing) setInitializing(false);

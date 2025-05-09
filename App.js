@@ -18,7 +18,7 @@ LogBox.ignoreLogs([
 
 export default function App() {
   const [isFirebaseReady, setIsFirebaseReady] = useState(false);
-  
+
   useEffect(() => {
     // Verificar que Firebase esté inicializado correctamente
     const checkFirebase = async () => {
@@ -27,7 +27,7 @@ export default function App() {
         setIsFirebaseReady(true);
       }, 1000);
     };
-    
+
     checkFirebase();
   }, []);
 

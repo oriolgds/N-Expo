@@ -28,13 +28,13 @@ const NewsCard = ({ article }) => {
   return (
     <Card style={styles.card} mode="outlined">
       {article.urlToImage && (
-        <Image 
-          source={{ uri: article.urlToImage }} 
-          style={styles.image} 
+        <Image
+          source={{ uri: article.urlToImage }}
+          style={styles.image}
           resizeMode="cover"
         />
       )}
-      
+
       <Card.Content style={styles.content}>
         <View style={styles.sourceContainer}>
           <Text style={styles.source}>{article.source.name}</Text>
@@ -42,7 +42,7 @@ const NewsCard = ({ article }) => {
         </View>
 
         <Text style={styles.title}>{article.title}</Text>
-        
+
         {expanded && article.description && (
           <Text style={styles.description}>{article.description}</Text>
         )}
@@ -55,21 +55,21 @@ const NewsCard = ({ article }) => {
           size={22}
           onPress={toggleLike}
         />
-        
+
         <IconButton
           icon="comment-outline"
           iconColor={COLORS.textSecondary}
           size={22}
-          onPress={() => {}}
+          onPress={() => { }}
         />
-        
+
         <IconButton
           icon={saved ? "bookmark" : "bookmark-outline"}
           iconColor={saved ? COLORS.accent : COLORS.textSecondary}
           size={22}
           onPress={toggleSave}
         />
-        
+
         <View style={styles.expandButtonContainer}>
           <Button
             onPress={() => setExpanded(!expanded)}
@@ -81,7 +81,7 @@ const NewsCard = ({ article }) => {
           </Button>
         </View>
       </View>
-      
+
       <Divider />
 
       <Card.Actions>

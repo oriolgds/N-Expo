@@ -19,19 +19,19 @@ const HomeScreen = () => {
       pageNum = 1;
       setNews([]);
     }
-    
+
     if (!hasMoreData && pageNum > 1) return;
-    
+
     try {
       setLoading(true);
       const response = await getTopHeadlines('es', '', pageNum);
-      
+
       if (refresh || pageNum === 1) {
         setNews(response.articles);
       } else {
         setNews(prevNews => [...prevNews, ...response.articles]);
       }
-      
+
       // Si recibimos menos artículos de los esperados, asumimos que no hay más datos
       setHasMoreData(response.articles.length === 20);
       setError(null);
@@ -63,7 +63,7 @@ const HomeScreen = () => {
 
   const renderFooter = () => {
     if (!loading || refreshing) return null;
-    
+
     return (
       <View style={styles.footerLoader}>
         <ActivityIndicator color={COLORS.accent} />

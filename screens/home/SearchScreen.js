@@ -14,11 +14,11 @@ const SearchScreen = () => {
 
   const handleSearch = async () => {
     if (!searchQuery.trim()) return;
-    
+
     setLoading(true);
     setError(null);
     setSearched(true);
-    
+
     try {
       const response = await searchNews(searchQuery);
       setResults(response.articles);

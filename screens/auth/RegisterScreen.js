@@ -19,47 +19,47 @@ const RegisterScreen = ({ navigation }) => {
       setError('Por favor completa todos los campos');
       return false;
     }
-    
+
     if (username.length < 3) {
       setError('El nombre de usuario debe tener al menos 3 caracteres');
       return false;
     }
-    
+
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
       setError('Por favor ingresa un correo electrónico válido');
       return false;
     }
-    
+
     if (password.length < 6) {
       setError('La contraseña debe tener al menos 6 caracteres');
       return false;
     }
-    
+
     if (password !== confirmPassword) {
       setError('Las contraseñas no coinciden');
       return false;
     }
-    
+
     return true;
   };
 
   const handleRegister = async () => {
     setError('');
-    
+
     if (!validateForm()) {
       return;
     }
-    
+
     setLoading(true);
-    
+
     try {
       await registerUser(email, password, username);
       setLoading(false);
       // El navegador redirigirá automáticamente si la autenticación es exitosa
     } catch (error) {
       setLoading(false);
-      
+
       if (error.code === 'auth/email-already-in-use') {
         setError('Este correo electrónico ya está en uso');
       } else if (error.code === 'auth/invalid-email') {
@@ -164,7 +164,7 @@ const RegisterScreen = ({ navigation }) => {
             )}
           </Button>
 
-          <TouchableOpacity 
+          <TouchableOpacity
             onPress={() => navigation.navigate('Login')}
             style={styles.linkContainer}
           >

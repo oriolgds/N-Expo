@@ -16,31 +16,31 @@ const LoginScreen = ({ navigation }) => {
       setError('Por favor completa todos los campos');
       return false;
     }
-    
+
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
       setError('Por favor ingresa un correo electrónico válido');
       return false;
     }
-    
+
     return true;
   };
 
   const handleLogin = async () => {
     setError('');
-    
+
     if (!validateForm()) {
       return;
     }
-    
+
     setLoading(true);
-    
+
     try {
       await loginUser(email, password);
       setLoading(false);
     } catch (error) {
       setLoading(false);
-      
+
       if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
         setError('Correo electrónico o contraseña incorrectos');
       } else if (error.code === 'auth/too-many-requests') {
@@ -112,7 +112,7 @@ const LoginScreen = ({ navigation }) => {
           )}
         </Button>
 
-        <TouchableOpacity 
+        <TouchableOpacity
           onPress={() => navigation.navigate('Register')}
           style={styles.linkContainer}
         >

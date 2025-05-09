@@ -15,7 +15,7 @@ const ProfileScreen = () => {
         const currentUser = getCurrentUser();
         if (currentUser) {
           const userDataFromFirestore = await getUserData(currentUser.uid);
-          
+
           setUserData({
             ...userDataFromFirestore,
             uid: currentUser.uid,
@@ -89,20 +89,20 @@ const ProfileScreen = () => {
           icon="cog"
           mode="outlined"
           style={styles.actionButton}
-          onPress={() => {}}
+          onPress={() => { }}
         >
           Configuración
         </Button>
-        
+
         <Button
           icon="bookmark"
           mode="outlined"
           style={styles.actionButton}
-          onPress={() => {}}
+          onPress={() => { }}
         >
           Noticias guardadas
         </Button>
-        
+
         <Button
           icon="logout"
           mode="contained"
