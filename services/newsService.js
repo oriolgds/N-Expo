@@ -67,7 +67,7 @@ export const getTopHeadlines = async (country = 'es', category = '', page = 1) =
         // PASO 3: Hacer solicitud directamente a la API
         const apiUrl = `${BASE_URL}/top-headlines`;
         console.log(`Haciendo petición a: ${apiUrl}`);
-        console.log('Parámetros:', { country: countryCode, category, page, pageSize: 20 });
+        console.log('Parámetros:', { country: countryCode, category, page, pageSize: 20, language: 'es' });
 
         const requestConfig = {
             params: {
@@ -75,6 +75,7 @@ export const getTopHeadlines = async (country = 'es', category = '', page = 1) =
                 pageSize: 20,
                 page: page,
                 apiKey: API_KEY,
+                language: 'es', // Añadir parámetro explícito de idioma español
             },
             headers: {
                 'Content-Type': 'application/json',
@@ -109,31 +110,69 @@ export const getTopHeadlines = async (country = 'es', category = '', page = 1) =
 
         console.log(`API devolvió ${response.data.articles.length} artículos de ${response.data.totalResults} totales`);
 
-        // Si no hay artículos, probamos con otros parámetros o usamos un fallback
+        // Si no hay artículos, probamos con otros parámetros pero manteniéndonos en español
         if (response.data.articles.length === 0) {
             console.log('No se encontraron artículos, probando con fallback');
 
-            // Intentamos con otro país si no se encontraron resultados
-            if (countryCode !== 'us' && page === 1) {
-                console.log('Probando con país US como fallback');
+            // Intentar primero sin país pero con fuentes españolas populares
+            console.log('Probando con medios españoles específicos como fallback');
+            const spanishSources = 'el-mundo,el-pais,marca,as,20-minutos,el-confidencial,abc-es,la-vanguardia';
+            const spanishSourcesResponse = await axios.get(apiUrl, {
+                params: {
+                    sources: spanishSources,
+                    pageSize: 20,
+                    page: 1,
+                    apiKey: API_KEY,
+                    language: 'es'
+                },
+                headers: requestConfig.headers
+            });
+
+            if (spanishSourcesResponse.data.articles && spanishSourcesResponse.data.articles.length > 0) {
+                response.data = spanishSourcesResponse.data;
+                console.log(`Fallback con medios españoles exitoso: ${response.data.articles.length} artículos encontrados`);
+            }
+            // Si no encontramos con medios españoles, probar con medios en español de otros países
+            else if (countryCode !== 'mx' && page === 1) {
+                console.log('Probando con país MX como fallback (español)');
+                const mexicoResponse = await axios.get(apiUrl, {
+                    params: {
+                        country: 'mx',
+                        pageSize: 20,
+                        page: 1,
+                        apiKey: API_KEY,
+                        language: 'es'
+                    },
+                    headers: requestConfig.headers
+                });
+
+                if (mexicoResponse.data.articles && mexicoResponse.data.articles.length > 0) {
+                    response.data = mexicoResponse.data;
+                    console.log(`Fallback con México exitoso: ${response.data.articles.length} artículos encontrados`);
+                }
+            }
+            // Solo si no encontramos nada en español, intentamos con US en inglés
+            else if (countryCode !== 'us' && page === 1) {
+                console.log('Probando con país US como último recurso');
                 const fallbackResponse = await axios.get(apiUrl, {
                     params: {
                         country: 'us',
                         pageSize: 20,
                         page: 1,
                         apiKey: API_KEY
-                    }
+                    },
+                    headers: requestConfig.headers
                 });
 
                 if (fallbackResponse.data.articles && fallbackResponse.data.articles.length > 0) {
                     response.data = fallbackResponse.data;
-                    console.log(`Fallback exitoso: ${response.data.articles.length} artículos encontrados`);
+                    console.log(`Fallback con US exitoso: ${response.data.articles.length} artículos encontrados`);
                 }
             }
 
-            // Si todavía no hay resultados, usamos noticias estáticas de fallback
+            // Si todavía no hay resultados, usamos noticias estáticas en español
             if (response.data.articles.length === 0) {
-                console.log('Usando noticias estáticas de fallback');
+                console.log('Usando noticias estáticas de fallback en español');
                 response.data.articles = getFallbackHeadlines();
                 response.data.totalResults = response.data.articles.length;
             }
@@ -433,7 +472,7 @@ export const searchNews = async (query, page = 1) => {
                 q: query,
                 page,
                 pageSize: 20,
-                language: 'es', // Configura el idioma según la región preferida
+                language: 'es', // Asegurar que la búsqueda sea en español
                 sortBy: 'publishedAt',
                 apiKey: API_KEY,
             },
