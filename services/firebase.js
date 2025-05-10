@@ -2,6 +2,7 @@
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/auth';
 import 'firebase/compat/firestore';
+import * as SecureStore from 'expo-secure-store';
 import Constants from 'expo-constants';
 
 // Configuración de Firebase
@@ -39,8 +40,8 @@ if (!firebase.apps.length) {
     firebase.initializeApp(firebaseConfig);
     console.log("Firebase inicializado correctamente");
 
-    // Cambiamos el método de persistencia que causa problemas
-    firebase.auth().setPersistence(firebase.auth.Auth.Persistence.SESSION);
+    // En React Native no podemos usar setPersistence como en web
+    console.log("Configurando persistencia manual para React Native");
   } catch (error) {
     console.error("Error al inicializar Firebase:", error);
   }
@@ -52,6 +53,11 @@ if (!firebase.apps.length) {
 // Referencias a servicios
 const auth = firebase.auth();
 const db = firebase.firestore();
+
+// Claves para SecureStore
+const AUTH_USER_KEY = 'firebase_auth_user';
+const EMAIL_KEY = 'firebase_auth_email';
+const PASSWORD_KEY = 'firebase_auth_password';
 
 // Función para registrar usuarios - siguiendo la documentación de Firestore
 export const registerUser = async (email, password, username) => {
@@ -85,9 +91,23 @@ export const registerUser = async (email, password, username) => {
   }
 };
 
+// Modificamos loginUser para guardar las credenciales de forma segura
 export const loginUser = async (email, password) => {
   try {
     const userCredential = await auth.signInWithEmailAndPassword(email, password);
+
+    // Guardar email y contraseña de forma segura para reautenticación automática
+    await SecureStore.setItemAsync(EMAIL_KEY, email);
+    await SecureStore.setItemAsync(PASSWORD_KEY, password);
+
+    // También guardar información básica del usuario
+    await SecureStore.setItemAsync(AUTH_USER_KEY, JSON.stringify({
+      email,
+      uid: userCredential.user.uid,
+      displayName: userCredential.user.displayName
+    }));
+
+    console.log("Sesión guardada exitosamente");
     return userCredential.user;
   } catch (error) {
     console.error("Error de login:", error);
@@ -98,9 +118,61 @@ export const loginUser = async (email, password) => {
 export const logoutUser = async () => {
   try {
     await auth.signOut();
+    // Eliminar todas las credenciales guardadas
+    await SecureStore.deleteItemAsync(AUTH_USER_KEY);
+    await SecureStore.deleteItemAsync(EMAIL_KEY);
+    await SecureStore.deleteItemAsync(PASSWORD_KEY);
+    console.log("Sesión eliminada exitosamente");
   } catch (error) {
     console.error("Error de logout:", error);
     throw error;
+  }
+};
+
+// Función para verificar si hay una sesión guardada e intentar restaurarla
+export const restoreSession = async () => {
+  try {
+    // Primero verificamos si ya hay un usuario autenticado
+    const currentUser = auth.currentUser;
+    if (currentUser) {
+      console.log("Usuario ya autenticado:", currentUser.email);
+      return currentUser;
+    }
+
+    // Si no hay usuario autenticado, intentamos reautenticar
+    const email = await SecureStore.getItemAsync(EMAIL_KEY);
+    const password = await SecureStore.getItemAsync(PASSWORD_KEY);
+
+    if (email && password) {
+      console.log("Intentando reautenticar con credenciales guardadas...");
+      try {
+        const userCredential = await auth.signInWithEmailAndPassword(email, password);
+        console.log("Reautenticación exitosa para:", email);
+        return userCredential.user;
+      } catch (authError) {
+        console.warn("Error en la reautenticación automática:", authError);
+
+        // Si la reautenticación falla, aún podemos retornar los datos del usuario para la UI
+        const userDataString = await SecureStore.getItemAsync(AUTH_USER_KEY);
+        if (userDataString) {
+          const userData = JSON.parse(userDataString);
+          return userData; // Solo para mostrar información en la UI
+        }
+      }
+    } else {
+      // Intentar recuperar la información básica del usuario si está disponible
+      const userDataString = await SecureStore.getItemAsync(AUTH_USER_KEY);
+      if (userDataString) {
+        const userData = JSON.parse(userDataString);
+        console.log("Encontrada información de usuario para:", userData.email);
+        return userData;
+      }
+    }
+
+    return null;
+  } catch (error) {
+    console.error("Error al restaurar sesión:", error);
+    return null;
   }
 };
 
