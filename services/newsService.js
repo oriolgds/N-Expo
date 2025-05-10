@@ -26,6 +26,32 @@ const firestore = db || firebaseInstance.firestore();
 const LOCAL_CACHE_KEY_PREFIX = 'news_cache_';
 const CACHE_TIMESTAMP_KEY = 'news_cache_timestamp';
 
+// Categorías soportadas por WorldNewsAPI
+export const NEWS_CATEGORIES = {
+    general: 'General',
+    politics: 'Política',
+    business: 'Negocios',
+    science: 'Ciencia',
+    technology: 'Tecnología',
+    entertainment: 'Entretenimiento',
+    sports: 'Deportes',
+    health: 'Salud',
+    world: 'Internacional'
+};
+
+// Mapa para convertir nuestras categorías a las categorías aceptadas por WorldNewsAPI
+const API_CATEGORY_MAP = {
+    general: '',  // General no tiene equivalente, se omite el parámetro
+    politics: 'politics',
+    business: 'business',
+    science: 'science',
+    technology: 'technology',
+    entertainment: 'entertainment',
+    sports: 'sports',
+    health: 'health',
+    world: 'world'  // Esta podría necesitar un mapeo específico si la API no la acepta como está
+};
+
 /**
  * Inicializa el sistema de caché y sincronización
  * Debe llamarse al inicio de la aplicación
@@ -59,26 +85,28 @@ export const initNewsSystem = async () => {
 /**
  * Suscribirse a actualizaciones en tiempo real de noticias
  * @param {string} country - Código de país (ej: 'es')
+ * @param {string} category - Categoría de noticias
  * @param {function} callback - Función a llamar cuando hay nuevas noticias
  * @returns {function} - Función para desuscribirse
  */
-export const subscribeToNewsUpdates = (country = 'es', callback) => {
+export const subscribeToNewsUpdates = (country = 'es', category = '', callback) => {
     const countryCode = country.toLowerCase();
-    const cacheKey = `headlines_${countryCode}_1`;
+    const categoryStr = category && category.trim() !== '' ? category.toLowerCase() : 'general';
+    const cacheKey = `headlines_${countryCode}_${categoryStr}_1`;
     const newsRef = database.ref(`news_cache/${cacheKey}`);
 
-    console.log(`Suscribiéndose a actualizaciones de noticias para ${countryCode}...`);
+    console.log(`Suscribiéndose a actualizaciones de noticias para ${countryCode}, categoría: ${categoryStr}...`);
 
     // Escuchar cambios en la base de datos en tiempo real
     const listener = newsRef.on('value', async (snapshot) => {
         try {
             const data = snapshot.val();
             if (data && data.articles && Array.isArray(data.articles)) {
-                console.log(`Recibida actualización con ${data.articles.length} artículos`);
+                console.log(`Recibida actualización con ${data.articles.length} artículos para categoría ${categoryStr}`);
 
                 // Actualizar caché local
                 await AsyncStorage.setItem(
-                    `${LOCAL_CACHE_KEY_PREFIX}${countryCode}`,
+                    `${LOCAL_CACHE_KEY_PREFIX}${countryCode}_${categoryStr}`,
                     JSON.stringify(data)
                 );
                 await AsyncStorage.setItem(CACHE_TIMESTAMP_KEY, Date.now().toString());
@@ -100,7 +128,7 @@ export const subscribeToNewsUpdates = (country = 'es', callback) => {
 
     // Devolver función para cancelar la suscripción
     return () => {
-        console.log(`Cancelando suscripción a noticias para ${countryCode}`);
+        console.log(`Cancelando suscripción a noticias para ${countryCode}, categoría: ${categoryStr}`);
         newsRef.off('value', listener);
     };
 };
@@ -108,12 +136,14 @@ export const subscribeToNewsUpdates = (country = 'es', callback) => {
 /**
  * Carga noticias desde caché local si están disponibles
  * @param {string} country - Código del país
+ * @param {string} category - Categoría de noticias
  * @returns {Promise<Object|null>} - Datos de noticias o null si no hay caché
  */
-export const loadCachedNews = async (country = 'es') => {
+export const loadCachedNews = async (country = 'es', category = '') => {
     try {
         const countryCode = country.toLowerCase();
-        const cacheKey = `${LOCAL_CACHE_KEY_PREFIX}${countryCode}`;
+        const categoryStr = category && category.trim() !== '' ? category.toLowerCase() : 'general';
+        const cacheKey = `${LOCAL_CACHE_KEY_PREFIX}${countryCode}_${categoryStr}`;
 
         const cachedData = await AsyncStorage.getItem(cacheKey);
         if (!cachedData) return null;
@@ -148,12 +178,107 @@ export const loadCachedNews = async (country = 'es') => {
  */
 export const forceNewsUpdate = async (country = 'es', category = '') => {
     try {
-        console.log('Forzando actualización de noticias...');
+        console.log(`Forzando actualización de noticias para categoría: ${category || 'general'}`);
         const result = await getTopHeadlines(country, category, 1, true);
         return result;
     } catch (error) {
         console.error('Error al forzar actualización:', error);
         throw error;
+    }
+};
+
+/**
+ * Recarga las noticias desde Firebase sin llamar a la API externa
+ * Útil para pull-to-refresh sin consumir cuota de API
+ * @param {string} country - Código del país
+ * @param {string} category - Categoría de noticias
+ * @returns {Promise<Object>} - Datos de noticias actualizados
+ */
+export const reloadNewsFromFirebase = async (country = 'es', category = '') => {
+    try {
+        const countryCode = country.toLowerCase();
+        const categoryStr = category && category.trim() !== '' ? category.toLowerCase() : 'general';
+
+        console.log(`====== RECARGANDO NOTICIAS ======`);
+        console.log(`País: ${countryCode}, Categoría: ${categoryStr}`);
+
+        // Clave específica para la categoría solicitada
+        const cacheKey = `headlines_${countryCode}_${categoryStr}_1`;
+        const cacheRef = database.ref(`news_cache/${cacheKey}`);
+
+        console.log(`Buscando datos con clave: ${cacheKey}`);
+
+        // Obtener los datos de Firebase para la categoría específica
+        const snapshot = await cacheRef.once('value');
+        const data = snapshot.val();
+
+        if (!data || !data.articles || !Array.isArray(data.articles) || data.articles.length === 0) {
+            console.log(`No hay datos en Firebase para la categoría ${categoryStr}, intentando con datos generales...`);
+
+            // Si no hay datos para la categoría específica, intentar con la categoría general
+            if (categoryStr !== 'general') {
+                const generalCacheKey = `headlines_${countryCode}_general_1`;
+                const generalCacheRef = database.ref(`news_cache/${generalCacheKey}`);
+                const generalSnapshot = await generalCacheRef.once('value');
+                const generalData = generalSnapshot.val();
+
+                if (generalData && generalData.articles && Array.isArray(generalData.articles) && generalData.articles.length > 0) {
+                    console.log(`Usando datos de categoría general como respaldo (${generalData.articles.length} artículos)`);
+
+                    // Filtrar artículos que puedan ser relevantes para la categoría solicitada
+                    const articlesWithSocial = await addSocialDataToArticles(generalData.articles);
+
+                    return {
+                        status: 'ok',
+                        totalResults: articlesWithSocial.length,
+                        articles: articlesWithSocial,
+                        fromFirebase: true,
+                        isGeneralFallback: true
+                    };
+                }
+            }
+
+            // Si no hay datos de categoría general o si estamos buscando ya en categoría general
+            console.log('No hay datos disponibles en Firebase, usando fallback local');
+            const fallbackArticles = getFallbackHeadlines();
+            const articlesWithSocial = await addSocialDataToArticles(fallbackArticles);
+            return {
+                status: 'ok',
+                totalResults: fallbackArticles.length,
+                articles: articlesWithSocial,
+                isFallback: true
+            };
+        }
+
+        console.log(`Datos recuperados de Firebase para categoría ${categoryStr} con ${data.articles.length} artículos`);
+
+        // Actualizar caché local para mantener sincronizado
+        await AsyncStorage.setItem(
+            `${LOCAL_CACHE_KEY_PREFIX}${countryCode}_${categoryStr}`,
+            JSON.stringify(data)
+        );
+
+        // Procesar con datos sociales actualizados
+        const articlesWithSocial = await addSocialDataToArticles(data.articles);
+
+        return {
+            status: 'ok',
+            totalResults: data.totalResults || articlesWithSocial.length,
+            articles: articlesWithSocial,
+            fromFirebase: true,
+            category: categoryStr // Incluir la categoría en la respuesta para verificación
+        };
+    } catch (error) {
+        console.error('Error al recargar noticias desde Firebase:', error);
+        // Proporcionar datos de fallback en caso de error
+        const fallbackArticles = getFallbackHeadlines();
+        const articlesWithSocial = await addSocialDataToArticles(fallbackArticles);
+        return {
+            status: 'ok',
+            totalResults: fallbackArticles.length,
+            articles: articlesWithSocial,
+            isFallback: true
+        };
     }
 };
 
@@ -176,11 +301,12 @@ export const getTopHeadlines = async (country = 'es', category = '', page = 1, f
             countryCode = 'es';
         }
 
-        // Generamos una clave única para este conjunto de parámetros
-        const cacheKey = `headlines_${countryCode}_${category}_${page}`;
+        // Generamos una clave única para este conjunto de parámetros incluyendo la categoría
+        const categoryStr = category && category.trim() !== '' ? category.toLowerCase() : 'general';
+        const cacheKey = `headlines_${countryCode}_${categoryStr}_${page}`;
         const cacheRef = database.ref(`news_cache/${cacheKey}`);
 
-        console.log(`Obteniendo titulares para país: ${countryCode}, categoría: ${category || 'general'}, página: ${page}`);
+        console.log(`Obteniendo titulares para país: ${countryCode}, categoría: ${categoryStr}, página: ${page}`);
 
         // PASO 1: Comprobar si hay datos en caché y si son recientes
         if (!forceUpdate) {
@@ -212,22 +338,63 @@ export const getTopHeadlines = async (country = 'es', category = '', page = 1, f
         }
 
         // PASO 2: Hacer solicitud directamente a la API
-        const apiUrl = `${BASE_URL}/top-news`;
+        // Si no hay categoría seleccionada o es 'general', usar top-news
+        // De lo contrario, usar search-news con filtro por categoría
+        const isGeneralCategory = !category || category.trim() === '' || categoryStr === 'general';
+        const apiUrl = isGeneralCategory ?
+            `${BASE_URL}/top-news` :
+            `${BASE_URL}/search-news`;
 
-        // CORREGIDO: Usar "source-country" (singular) en lugar de "source-countries" (plural)
-        const fullUrl = `${apiUrl}?api-key=${API_KEY}&source-country=${countryCode}&language=es&number=20&offset=${(page - 1) * 20}`;
+        console.log(`Usando endpoint: ${isGeneralCategory ? 'top-news' : 'search-news'}`);
+
+        // Construir la URL con los parámetros correspondientes según el endpoint
+        let fullUrl;
+
+        if (isGeneralCategory) {
+            // Para top-news: país e idioma
+            fullUrl = `${apiUrl}?source-country=${countryCode}&language=es`;
+            if (page > 1) {
+                // API de top-news puede no soportar paginación como search-news
+                // Agregamos un parámetro de offset en caso de que lo soporte
+                fullUrl += `&offset=${(page - 1) * 20}`;
+            }
+        } else {
+            // Para search-news: país, idioma, paginación y categoría
+            fullUrl = `${apiUrl}?source-country=${countryCode}&language=es&number=20&offset=${(page - 1) * 20}`;
+
+            // Obtener la categoría mapeada a los valores aceptados por la API
+            const apiCategory = API_CATEGORY_MAP[categoryStr] || categoryStr;
+
+            if (apiCategory) {
+                fullUrl += `&categories=${encodeURIComponent(apiCategory)}`;
+                // Agregamos sorting para obtener las noticias más recientes primero
+                fullUrl += `&sort=publish-time&sort-direction=desc`;
+                console.log(`Usando categoría API: ${apiCategory}`);
+            }
+        }
 
         console.log(`Haciendo petición a: ${apiUrl}`);
-        console.log(`Usando país: "${countryCode}"`);
+        console.log(`URL completa: ${fullUrl}`);
 
-        const response = await axios.get(fullUrl);
+        // Realizar la petición con la API key en los headers en lugar de la URL
+        const response = await axios.get(fullUrl, {
+            headers: {
+                'Content-Type': 'application/json',
+                'User-Agent': 'N-Expo-App/1.0',
+                'x-api-key': API_KEY
+            }
+        });
 
         console.log(`Respuesta API [${response.status}]:`, JSON.stringify(response.data).substring(0, 150) + '...');
 
-        // Adaptar la estructura de respuesta según el endpoint usado (search-news)
+        // Adaptar la estructura de respuesta según el endpoint usado
         let adaptedArticles = [];
-        if (response.data && response.data.news) {
-            // Adaptar directamente desde el formato search-news
+        if (isGeneralCategory && response.data && response.data.top_news) {
+            // Para top-news, usamos la adaptación específica
+            adaptedArticles = adaptWorldNewsApiResponse(response.data);
+            console.log(`Recibidos artículos desde top-news para ${countryCode}`);
+        } else if (response.data && response.data.news) {
+            // Para search-news, adaptamos directamente
             adaptedArticles = response.data.news.map(article => ({
                 id: article.id.toString(),
                 title: article.title,
@@ -237,14 +404,14 @@ export const getTopHeadlines = async (country = 'es', category = '', page = 1, f
                 publishedAt: article.publish_date,
                 content: article.text,
                 author: article.author || (article.authors && article.authors.length > 0 ? article.authors[0] : ''),
+                category: article.category || categoryStr || 'general', // Aseguramos que nunca sea undefined
                 source: {
                     id: null,
                     name: extractDomainFromUrl(article.url)
                 }
             }));
-        } else if (response.data && response.data.top_news) {
-            // Mantener la adaptación para top-news si ese endpoint funciona
-            adaptedArticles = adaptWorldNewsApiResponse(response.data);
+
+            console.log(`Recibidos ${adaptedArticles.length} artículos de categoría "${categoryStr}"`);
         }
 
         if (adaptedArticles.length === 0) {
@@ -308,10 +475,16 @@ export const getTopHeadlines = async (country = 'es', category = '', page = 1, f
  */
 const updateNewsCache = async (cacheKey, articles, countryCode) => {
     try {
+        // Garantizar que no hay valores undefined en los artículos
+        const safeArticles = articles.map(article => ({
+            ...article,
+            category: article.category || 'general', // Asignar valor por defecto si category es undefined
+        }));
+
         const dataToCache = {
-            articles: articles,
+            articles: safeArticles,
             timestamp: Date.now(),
-            totalResults: articles.length
+            totalResults: safeArticles.length
         };
 
         const cacheRef = database.ref(`news_cache/${cacheKey}`);
@@ -352,6 +525,7 @@ const adaptWorldNewsApiResponse = (response) => {
                         publishedAt: mainArticle.publish_date,
                         content: mainArticle.text,
                         author: mainArticle.author || (mainArticle.authors && mainArticle.authors.length > 0 ? mainArticle.authors[0] : ''),
+                        category: mainArticle.category || 'general', // Aseguramos que nunca sea undefined
                         source: {
                             id: null,
                             name: extractDomainFromUrl(mainArticle.url)
@@ -413,13 +587,14 @@ export const searchNews = async (query, page = 1) => {
         }
 
         // Usar el endpoint de búsqueda que ya sabemos que funciona
-        const fullUrl = `${BASE_URL}/search-news?api-key=${API_KEY}&source-country=es&language=es&number=20&offset=${(page - 1) * 20}&text=${encodeURIComponent(query)}`;
+        // Quitar la API key de la URL
+        const fullUrl = `${BASE_URL}/search-news?source-country=es&language=es&number=20&offset=${(page - 1) * 20}&text=${encodeURIComponent(query)}`;
 
         const response = await axios.get(fullUrl, {
             headers: {
                 'Content-Type': 'application/json',
                 'User-Agent': 'N-Expo-App/1.0',
-                'x-api-key': API_KEY
+                'x-api-key': API_KEY  // API key consistente en los headers
             }
         });
 
@@ -495,7 +670,8 @@ const getFallbackHeadlines = () => {
             url: 'https://example.com/eu-tech-regulations',
             urlToImage: 'https://picsum.photos/800/400?random=1',
             publishedAt: todayStr,
-            content: 'La Unión Europea ha aprobado hoy un paquete de medidas que regulará de forma más estricta a las grandes empresas tecnológicas...'
+            content: 'La Unión Europea ha aprobado hoy un paquete de medidas que regulará de forma más estricta a las grandes empresas tecnológicas...',
+            category: 'technology' // Añadimos categoría a los artículos de fallback
         },
         {
             id: 'fallback-2',
@@ -506,7 +682,8 @@ const getFallbackHeadlines = () => {
             url: 'https://example.com/ai-medicine',
             urlToImage: 'https://picsum.photos/800/400?random=2',
             publishedAt: todayStr,
-            content: 'Un equipo internacional de científicos ha desarrollado una nueva tecnología de IA capaz de detectar cáncer en etapas tempranas...'
+            content: 'Un equipo internacional de científicos ha desarrollado una nueva tecnología de IA capaz de detectar cáncer en etapas tempranas...',
+            category: 'health' // Añadimos categoría
         },
         {
             id: 'fallback-3',
@@ -517,7 +694,8 @@ const getFallbackHeadlines = () => {
             url: 'https://example.com/spain-renewable',
             urlToImage: 'https://picsum.photos/800/400?random=3',
             publishedAt: yesterdayStr,
-            content: 'España se ha convertido en un referente europeo en la transición energética tras alcanzar un récord de generación renovable...'
+            content: 'España se ha convertido en un referente europeo en la transición energética tras alcanzar un récord de generación renovable...',
+            category: 'science' // Añadimos categoría
         },
         {
             id: 'fallback-4',
@@ -528,7 +706,8 @@ const getFallbackHeadlines = () => {
             url: 'https://example.com/privacy-law',
             urlToImage: 'https://picsum.photos/800/400?random=4',
             publishedAt: yesterdayStr,
-            content: 'La nueva legislación obligará a las empresas a implementar medidas de seguridad más rigurosas y transparentas en el tratamiento de datos personales...'
+            content: 'La nueva legislación obligará a las empresas a implementar medidas de seguridad más rigurosas y transparentas en el tratamiento de datos personales...',
+            category: 'politics' // Añadimos categoría
         },
         {
             id: 'fallback-5',
@@ -539,7 +718,8 @@ const getFallbackHeadlines = () => {
             url: 'https://example.com/work-transformation',
             urlToImage: 'https://picsum.photos/800/400?random=5',
             publishedAt: yesterdayStr,
-            content: 'El teletrabajo se consolida como una opción permanente para muchas empresas, mientras surgen nuevas profesiones relacionadas con la digitalización...'
+            content: 'El teletrabajo se consolida como una opción permanente para muchas empresas, mientras surgen nuevas profesiones relacionadas con la digitalización...',
+            category: 'business' // Añadimos categoría
         }
     ];
 };

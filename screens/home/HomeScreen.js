@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { View, FlatList, StyleSheet, RefreshControl, Animated, Image, TouchableOpacity, Platform, StatusBar } from 'react-native';
-import { ActivityIndicator, Text, IconButton } from 'react-native-paper';
+import { View, FlatList, StyleSheet, RefreshControl, Animated, Image, TouchableOpacity, Platform, StatusBar, ScrollView } from 'react-native';
+import { ActivityIndicator, Text, IconButton, Chip } from 'react-native-paper';
 import { useNavigation } from '@react-navigation/native';
 import {
   getTopHeadlines,
   getUserRegion,
   subscribeToNewsUpdates,
   loadCachedNews,
-  forceNewsUpdate
+  forceNewsUpdate,
+  reloadNewsFromFirebase,
+  NEWS_CATEGORIES
 } from '../../services/newsService';
 import NewsCard from '../../components/NewsCard';
 import { COLORS } from '../../styles/theme';
@@ -16,6 +18,7 @@ import { COLORS } from '../../styles/theme';
 const HEADER_HEIGHT = 60; // Altura del contenido del header
 const HEADER_PADDING_TOP = Platform.OS === 'ios' ? 40 : 30; // Padding superior para evitar solaparse con la barra del sistema
 const HEADER_TOTAL_HEIGHT = HEADER_HEIGHT + HEADER_PADDING_TOP; // Altura total incluyendo padding
+const CATEGORY_BAR_HEIGHT = 50; // Altura de la barra de categorías
 
 const HomeScreen = () => {
   const [news, setNews] = useState([]);
@@ -25,15 +28,16 @@ const HomeScreen = () => {
   const [page, setPage] = useState(1);
   const [hasMoreData, setHasMoreData] = useState(true);
   const [userRegion, setUserRegion] = useState('es');
+  const [selectedCategory, setSelectedCategory] = useState('');
   const navigation = useNavigation();
 
   // Ref para la animación del scroll
   const scrollY = useRef(new Animated.Value(0)).current;
-  const scrollYClamped = Animated.diffClamp(scrollY, 0, HEADER_TOTAL_HEIGHT);
+  const scrollYClamped = Animated.diffClamp(scrollY, 0, HEADER_TOTAL_HEIGHT + CATEGORY_BAR_HEIGHT);
 
   const translateY = scrollYClamped.interpolate({
-    inputRange: [0, HEADER_TOTAL_HEIGHT],
-    outputRange: [0, -HEADER_TOTAL_HEIGHT],
+    inputRange: [0, HEADER_TOTAL_HEIGHT + CATEGORY_BAR_HEIGHT],
+    outputRange: [0, -(HEADER_TOTAL_HEIGHT + CATEGORY_BAR_HEIGHT)],
     extrapolate: 'clamp',
   });
 
@@ -48,7 +52,7 @@ const HomeScreen = () => {
       listener: event => {
         const offsetY = event.nativeEvent.contentOffset.y;
         // Actualizar el valor clampedScrollY con el valor actual del scroll
-        clampedScrollY.setValue(Math.min(Math.max(0, offsetY), HEADER_TOTAL_HEIGHT));
+        clampedScrollY.setValue(Math.min(Math.max(0, offsetY), HEADER_TOTAL_HEIGHT + CATEGORY_BAR_HEIGHT));
 
         // Determinar la dirección del scroll
         if (offsetY > clampedScrollY._value) {
@@ -80,24 +84,32 @@ const HomeScreen = () => {
   const initialLoad = useCallback(async () => {
     try {
       setLoading(true);
+      setPage(1); // Reset page cuando cambiamos de categoría
+
+      console.log(`Iniciando carga para categoría: ${selectedCategory === '' ? 'top-news' : selectedCategory}`);
 
       // Intentar cargar desde caché primero para mostrar algo rápidamente
-      const cachedNews = await loadCachedNews(userRegion);
+      const cachedNews = await loadCachedNews(userRegion, selectedCategory);
 
       if (cachedNews && cachedNews.articles.length > 0) {
-        console.log('Usando noticias en caché para carga inicial');
+        console.log(`Usando noticias en caché para carga inicial de categoría: ${selectedCategory === '' ? 'top-news' : selectedCategory}`);
         setNews(cachedNews.articles);
         setError(null);
-        setLoading(false);
+        // No establecemos loading=false aquí para evitar mostrar la UI como cargada cuando realmente
+        // estamos recargando en segundo plano
       }
 
       // Independientemente de si tenemos caché, cargar datos frescos
-      const response = await getTopHeadlines(userRegion);
+      console.log(`Solicitando datos frescos para: ${selectedCategory === '' ? 'top-news' : selectedCategory}`);
+      const response = await getTopHeadlines(userRegion, selectedCategory);
 
       if (response && Array.isArray(response.articles)) {
+        console.log(`Recibidos ${response.articles.length} artículos frescos`);
         setNews(response.articles);
         setHasMoreData(response.articles.length === 20);
         setError(null);
+      } else {
+        console.error('La respuesta no contiene artículos válidos:', response);
       }
     } catch (error) {
       console.error('Error cargando noticias:', error);
@@ -105,19 +117,20 @@ const HomeScreen = () => {
         setError('Error al cargar noticias. Intentando conectar en tiempo real...');
       }
     } finally {
+      console.log('Finalizando carga inicial');
       setLoading(false);
     }
-  }, [userRegion]);
+  }, [userRegion, selectedCategory]);
 
-  // Cargar datos iniciales y configurar suscripción en tiempo real
+  // Cargar datos iniciales y configurar suscripción en tiempo real cuando cambia la categoría
   useEffect(() => {
     // Carga inicial
     initialLoad();
 
     // Configurar suscripción en tiempo real
-    const unsubscribe = subscribeToNewsUpdates(userRegion, (updatedData) => {
+    const unsubscribe = subscribeToNewsUpdates(userRegion, selectedCategory, (updatedData) => {
       if (updatedData && Array.isArray(updatedData.articles)) {
-        console.log('Recibida actualización automática de noticias');
+        console.log(`Recibida actualización automática de noticias para categoría: ${selectedCategory || 'general'}`);
         setNews(updatedData.articles);
         setError(null);
       }
@@ -125,25 +138,31 @@ const HomeScreen = () => {
 
     // Limpiar suscripción al desmontar
     return () => unsubscribe();
-  }, [userRegion, initialLoad]);
+  }, [userRegion, selectedCategory, initialLoad]);
 
   // Manejar el pull-to-refresh
   const handleRefresh = useCallback(async () => {
     try {
+      console.log(`Pull-to-refresh para categoría: ${selectedCategory || 'general'}`);
       setRefreshing(true);
-      const response = await forceNewsUpdate(userRegion);
+      // Usamos reloadNewsFromFirebase para no consumir cuota de API
+      const response = await reloadNewsFromFirebase(userRegion, selectedCategory);
 
       if (response && Array.isArray(response.articles)) {
+        console.log(`Recibidos ${response.articles.length} artículos desde Firebase para categoría: ${response.category || selectedCategory || 'general'}`);
+
         setNews(response.articles);
         setHasMoreData(response.articles.length === 20);
         setError(null);
+      } else {
+        console.error("Error: respuesta sin artículos", response);
       }
     } catch (error) {
-      console.error('Error al refrescar:', error);
+      console.error('Error al refrescar desde Firebase:', error);
     } finally {
       setRefreshing(false);
     }
-  }, [userRegion]);
+  }, [userRegion, selectedCategory]);
 
   const handleLoadMore = async () => {
     if (loading || refreshing || !hasMoreData) return;
@@ -152,7 +171,7 @@ const HomeScreen = () => {
       const nextPage = page + 1;
       setPage(nextPage);
 
-      const response = await getTopHeadlines(userRegion, '', nextPage);
+      const response = await getTopHeadlines(userRegion, selectedCategory, nextPage);
 
       if (response && Array.isArray(response.articles)) {
         const newArticles = response.articles;
@@ -167,6 +186,39 @@ const HomeScreen = () => {
     } catch (error) {
       console.error('Error cargando más noticias:', error);
     }
+  };
+
+  const handleCategorySelect = (category) => {
+    // Importante: diferenciar entre categoría "general" (con valor "general") y top-news (con valor "")
+    if (category === selectedCategory) {
+      // Si ya estamos en una categoría específica y hacemos clic en ella de nuevo, volver a top-news
+      if (selectedCategory !== '') {
+        console.log(`Deseleccionando categoría: ${selectedCategory} -> top-news`);
+
+        // Limpiar estado y preparar para cargar top-news
+        setNews([]);
+        setError(null);
+        setLoading(true);
+        setPage(1);
+
+        // Establecer categoría vacía para volver a top-news
+        setSelectedCategory('');
+      }
+      return;
+    }
+
+    console.log(`Cambiando categoría: ${selectedCategory === '' ? 'top-news' : selectedCategory} -> ${category || 'top-news'}`);
+
+    // Primero limpiar los artículos actuales para evitar mostrar datos incorrectos
+    setNews([]);
+    setError(null);
+    setLoading(true);
+
+    // Reiniciar página a 1 cuando cambia la categoría
+    setPage(1);
+
+    // Cambiar la categoría (esto activará el useEffect que carga los datos)
+    setSelectedCategory(category);
   };
 
   const renderFooter = () => {
@@ -189,6 +241,56 @@ const HomeScreen = () => {
   // Navegar a la pantalla de perfil
   const goToProfile = () => {
     navigation.navigate('Profile');
+  };
+
+  // Renderizar chips de categorías
+  const renderCategoryChips = () => {
+    return (
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.categoriesContainer}
+        contentContainerStyle={styles.categoriesContentContainer}
+      >
+        {/* Top News (sin categoría) */}
+        <Chip
+          selected={selectedCategory === ''}
+          onPress={() => handleCategorySelect('')}
+          style={styles.categoryChip}
+          textStyle={selectedCategory === '' ? styles.selectedCategoryText : styles.categoryText}
+          mode={selectedCategory === '' ? 'flat' : 'outlined'}
+        >
+          Top News
+        </Chip>
+
+        {/* Categoría General */}
+        <Chip
+          selected={selectedCategory === 'general'}
+          onPress={() => handleCategorySelect('general')}
+          style={styles.categoryChip}
+          textStyle={selectedCategory === 'general' ? styles.selectedCategoryText : styles.categoryText}
+          mode={selectedCategory === 'general' ? 'flat' : 'outlined'}
+        >
+          {NEWS_CATEGORIES.general}
+        </Chip>
+
+        {/* Resto de categorías */}
+        {Object.entries(NEWS_CATEGORIES)
+          .filter(([key]) => key !== 'general')
+          .map(([key, label]) => (
+            <Chip
+              key={key}
+              selected={selectedCategory === key}
+              onPress={() => handleCategorySelect(key)}
+              style={styles.categoryChip}
+              textStyle={selectedCategory === key ? styles.selectedCategoryText : styles.categoryText}
+              mode={selectedCategory === key ? 'flat' : 'outlined'}
+            >
+              {label}
+            </Chip>
+          ))}
+      </ScrollView>
+    );
   };
 
   return (
@@ -216,17 +318,19 @@ const HomeScreen = () => {
             />
           </TouchableOpacity>
         </View>
+        {/* Selector de categorías */}
+        {renderCategoryChips()}
       </Animated.View>
 
       <StatusBar backgroundColor={COLORS.background} barStyle="dark-content" />
 
       {error ? (
-        <View style={[styles.errorContainer, { marginTop: HEADER_TOTAL_HEIGHT }]}>
+        <View style={[styles.errorContainer, { marginTop: HEADER_TOTAL_HEIGHT + CATEGORY_BAR_HEIGHT }]}>
           <Text style={styles.errorText}>{error}</Text>
         </View>
       ) : (
         <Animated.FlatList
-          contentContainerStyle={{ paddingTop: HEADER_TOTAL_HEIGHT }}
+          contentContainerStyle={{ paddingTop: HEADER_TOTAL_HEIGHT + CATEGORY_BAR_HEIGHT }}
           data={news}
           keyExtractor={(item) => item?.id || `${item?.title || Math.random()}-${Math.random()}`}
           renderItem={renderItem}
@@ -236,7 +340,7 @@ const HomeScreen = () => {
               onRefresh={handleRefresh}
               colors={[COLORS.accent]}
               tintColor={COLORS.accent}
-              progressViewOffset={HEADER_TOTAL_HEIGHT}
+              progressViewOffset={HEADER_TOTAL_HEIGHT + CATEGORY_BAR_HEIGHT}
             />
           }
           onEndReached={handleLoadMore}
@@ -249,7 +353,7 @@ const HomeScreen = () => {
               </View>
             ) : (
               <View style={styles.emptyContainer}>
-                <Text>No hay noticias disponibles</Text>
+                <Text>No hay noticias disponibles para esta categoría</Text>
               </View>
             )
           }
@@ -272,7 +376,7 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    height: HEADER_TOTAL_HEIGHT,
+    height: HEADER_TOTAL_HEIGHT + CATEGORY_BAR_HEIGHT,
     backgroundColor: COLORS.background,
     zIndex: 1000,
     elevation: 4,
@@ -283,7 +387,7 @@ const styles = StyleSheet.create({
     paddingTop: HEADER_PADDING_TOP, // Usamos paddingTop para evitar ver el fondo
   },
   headerContent: {
-    flex: 1,
+    height: HEADER_HEIGHT,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -292,6 +396,27 @@ const styles = StyleSheet.create({
   logo: {
     height: 40,
     width: 40,
+  },
+  categoriesContainer: {
+    height: CATEGORY_BAR_HEIGHT,
+    flexGrow: 0,
+  },
+  categoriesContentContainer: {
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    alignItems: 'center',
+  },
+  categoryChip: {
+    marginHorizontal: 4,
+    height: 34,
+  },
+  categoryText: {
+    fontSize: 13,
+  },
+  selectedCategoryText: {
+    fontSize: 13,
+    fontWeight: 'bold',
+    color: COLORS.primary,
   },
   loaderContainer: {
     flex: 1,
