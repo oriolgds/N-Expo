@@ -12,13 +12,14 @@ export const COLORS = {
   disabled: '#AAB8C2',    // Gris claro
   placeholder: '#AAB8C2', // Gris claro
   backdrop: 'rgba(0, 0, 0, 0.5)',
-  border: '#E1E8ED',      // Gris muy claro para bordes
 };
 
+// Definir correctamente todas las variantes de texto necesarias
 export const FONTS = {
+  // Variantes de fuente requeridas por React Native Paper
   regular: {
     fontFamily: 'System',
-    fontWeight: 'normal',
+    fontWeight: '400',
   },
   medium: {
     fontFamily: 'System',
@@ -31,6 +32,67 @@ export const FONTS = {
   bold: {
     fontFamily: 'System',
     fontWeight: 'bold',
+  },
+  // Variantes adicionales para React Native Paper v5+
+  bodyLarge: {
+    fontFamily: 'System',
+    fontWeight: '400',
+    fontSize: 16,
+  },
+  bodyMedium: {
+    fontFamily: 'System',
+    fontWeight: '400',
+    fontSize: 14,
+  },
+  bodySmall: {
+    fontFamily: 'System',
+    fontWeight: '400',
+    fontSize: 12,
+  },
+  titleLarge: {
+    fontFamily: 'System',
+    fontWeight: '700',
+    fontSize: 20,
+  },
+  titleMedium: {
+    fontFamily: 'System',
+    fontWeight: '600',
+    fontSize: 16,
+  },
+  titleSmall: {
+    fontFamily: 'System',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  labelLarge: {
+    fontFamily: 'System',
+    fontWeight: '500',
+    fontSize: 14,
+  },
+  labelMedium: {
+    fontFamily: 'System',
+    fontWeight: '500',
+    fontSize: 12,
+  },
+  labelSmall: {
+    fontFamily: 'System',
+    fontWeight: '500',
+    fontSize: 10,
+  },
+  headlineLarge: {
+    fontFamily: 'System',
+    fontWeight: '700',
+    fontSize: 32,
+  },
+  headlineMedium: {
+    fontFamily: 'System',
+    fontWeight: '700',
+    fontSize: 28,
+  },
+  headlineSmall: {
+    fontFamily: 'System',
+    fontWeight: '700',
+    fontSize: 24,
   },
 };
 

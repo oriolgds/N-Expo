@@ -89,66 +89,108 @@ const RegisterScreen = ({ navigation }) => {
         <View style={styles.formContainer}>
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
-          <TextInput
-            label="Nombre de usuario"
-            value={username}
-            onChangeText={setUsername}
-            autoCapitalize="none"
-            mode="outlined"
-            style={styles.input}
-            outlineColor={COLORS.border}
-            activeOutlineColor={COLORS.accent}
-            left={<TextInput.Icon icon="account" />}
-          />
+          {/* Campo de nombre de usuario con enfoque personalizado */}
+          <View style={styles.inputContainer}>
+            <View style={styles.iconContainer}>
+              <TextInput.Icon icon="account" color={COLORS.textSecondary} />
+            </View>
+            <TextInput
+              label="Nombre de usuario"
+              value={username}
+              onChangeText={setUsername}
+              autoCapitalize="none"
+              mode="outlined"
+              style={styles.textInput}
+              outlineColor={COLORS.border}
+              activeOutlineColor="#000000"
+              theme={{
+                roundness: 10,
+                colors: { onSurfaceVariant: COLORS.textSecondary }
+              }}
+            />
+          </View>
 
-          <TextInput
-            label="Correo electrónico"
-            value={email}
-            onChangeText={setEmail}
-            keyboardType="email-address"
-            autoCapitalize="none"
-            mode="outlined"
-            style={styles.input}
-            outlineColor={COLORS.border}
-            activeOutlineColor={COLORS.accent}
-            left={<TextInput.Icon icon="email" />}
-          />
+          {/* Campo de email con enfoque personalizado */}
+          <View style={styles.inputContainer}>
+            <View style={styles.iconContainer}>
+              <TextInput.Icon icon="email" color={COLORS.textSecondary} />
+            </View>
+            <TextInput
+              label="Correo electrónico"
+              value={email}
+              onChangeText={setEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              mode="outlined"
+              style={styles.textInput}
+              outlineColor={COLORS.border}
+              activeOutlineColor="#000000"
+              theme={{
+                roundness: 10,
+                colors: { onSurfaceVariant: COLORS.textSecondary }
+              }}
+            />
+          </View>
 
-          <TextInput
-            label="Contraseña"
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry={secureTextEntry}
-            mode="outlined"
-            style={styles.input}
-            outlineColor={COLORS.border}
-            activeOutlineColor={COLORS.accent}
-            left={<TextInput.Icon icon="lock" />}
-            right={
+          {/* Campo de contraseña con enfoque personalizado */}
+          <View style={styles.inputContainer}>
+            <View style={styles.iconContainer}>
+              <TextInput.Icon icon="lock" color={COLORS.textSecondary} />
+            </View>
+            <TextInput
+              label="Contraseña"
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry={secureTextEntry}
+              mode="outlined"
+              style={styles.textInput}
+              outlineColor={COLORS.border}
+              activeOutlineColor="#000000"
+              theme={{
+                roundness: 10,
+                colors: { onSurfaceVariant: COLORS.textSecondary }
+              }}
+            />
+            <TouchableOpacity
+              style={styles.rightIconContainer}
+              onPress={() => setSecureTextEntry(!secureTextEntry)}
+            >
               <TextInput.Icon
                 icon={secureTextEntry ? "eye" : "eye-off"}
-                onPress={() => setSecureTextEntry(!secureTextEntry)}
+                color={COLORS.textSecondary}
               />
-            }
-          />
+            </TouchableOpacity>
+          </View>
 
-          <TextInput
-            label="Confirmar contraseña"
-            value={confirmPassword}
-            onChangeText={setConfirmPassword}
-            secureTextEntry={secureConfirmTextEntry}
-            mode="outlined"
-            style={styles.input}
-            outlineColor={COLORS.border}
-            activeOutlineColor={COLORS.accent}
-            left={<TextInput.Icon icon="lock-check" />}
-            right={
+          {/* Campo de confirmar contraseña con enfoque personalizado */}
+          <View style={styles.inputContainer}>
+            <View style={styles.iconContainer}>
+              <TextInput.Icon icon="lock-check" color={COLORS.textSecondary} />
+            </View>
+            <TextInput
+              label="Confirmar contraseña"
+              value={confirmPassword}
+              onChangeText={setConfirmPassword}
+              secureTextEntry={secureConfirmTextEntry}
+              mode="outlined"
+              style={styles.textInput}
+              outlineColor={COLORS.border}
+              activeOutlineColor="#000000"
+              theme={{
+                roundness: 10,
+                colors: { onSurfaceVariant: COLORS.textSecondary }
+              }}
+            />
+            <TouchableOpacity
+              style={styles.rightIconContainer}
+              onPress={() => setSecureConfirmTextEntry(!secureConfirmTextEntry)}
+            >
               <TextInput.Icon
                 icon={secureConfirmTextEntry ? "eye" : "eye-off"}
-                onPress={() => setSecureConfirmTextEntry(!secureConfirmTextEntry)}
+                color={COLORS.textSecondary}
               />
-            }
-          />
+            </TouchableOpacity>
+          </View>
 
           <Button
             mode="contained"
@@ -208,9 +250,35 @@ const styles = StyleSheet.create({
   formContainer: {
     width: '100%',
   },
-  input: {
+  inputContainer: {
+    flexDirection: 'row',
     marginBottom: 16,
+    position: 'relative',
+    alignItems: 'center',
+  },
+  iconContainer: {
+    position: 'absolute',
+    left: 8,
+    zIndex: 1,
+    height: '100%',
+    justifyContent: 'center',
+    marginTop: 6,
+  },
+  rightIconContainer: {
+    position: 'absolute',
+    right: 8,
+    zIndex: 1,
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 18,
+    marginTop: 6,
+  },
+  textInput: {
+    flex: 1,
     backgroundColor: COLORS.background,
+    paddingLeft: 26,
+    paddingRight: 30,
   },
   button: {
     marginTop: 10,
