@@ -11,17 +11,33 @@ const SearchScreen = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [searched, setSearched] = useState(false);
+  const [page, setPage] = useState(1);
+  const [hasMoreData, setHasMoreData] = useState(true);
 
-  const handleSearch = async () => {
+  const handleSearch = async (pageNum = 1, isNewSearch = true) => {
     if (!searchQuery.trim()) return;
 
     setLoading(true);
     setError(null);
     setSearched(true);
 
+    if (isNewSearch) {
+      setResults([]);
+      setPage(1);
+      pageNum = 1;
+    }
+
     try {
-      const response = await searchNews(searchQuery);
-      setResults(response.articles);
+      const response = await searchNews(searchQuery, pageNum);
+
+      if (isNewSearch) {
+        setResults(response.articles);
+      } else {
+        setResults(prevResults => [...prevResults, ...response.articles]);
+      }
+
+      // Si recibimos menos artículos de los esperados, asumimos que no hay más datos
+      setHasMoreData(response.articles.length === 20);
     } catch (error) {
       setError('Error al buscar noticias. Por favor, intenta de nuevo.');
       console.error('Error searching news:', error);
@@ -30,18 +46,36 @@ const SearchScreen = () => {
     }
   };
 
+  const handleLoadMore = () => {
+    if (!loading && hasMoreData) {
+      const nextPage = page + 1;
+      setPage(nextPage);
+      handleSearch(nextPage, false);
+    }
+  };
+
+  const renderFooter = () => {
+    if (!loading || results.length === 0) return null;
+
+    return (
+      <View style={styles.footerLoader}>
+        <ActivityIndicator color={COLORS.accent} />
+      </View>
+    );
+  };
+
   return (
     <View style={styles.container}>
       <Searchbar
         placeholder="Buscar noticias..."
         onChangeText={setSearchQuery}
         value={searchQuery}
-        onSubmitEditing={handleSearch}
+        onSubmitEditing={() => handleSearch()}
         style={styles.searchBar}
         iconColor={COLORS.accent}
       />
 
-      {loading ? (
+      {loading && results.length === 0 ? (
         <View style={styles.loaderContainer}>
           <ActivityIndicator size="large" color={COLORS.accent} />
         </View>
@@ -52,8 +86,11 @@ const SearchScreen = () => {
       ) : (
         <FlatList
           data={results}
-          keyExtractor={(item, index) => `${item.title}-${index}`}
+          keyExtractor={(item, index) => item.id || `${item.title}-${index}`}
           renderItem={({ item }) => <NewsCard article={item} />}
+          onEndReached={handleLoadMore}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={renderFooter}
           ListEmptyComponent={
             searched ? (
               <View style={styles.emptyContainer}>
@@ -103,6 +140,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 20,
     marginTop: 80,
+  },
+  footerLoader: {
+    padding: 20,
+    alignItems: 'center',
   },
 });
 

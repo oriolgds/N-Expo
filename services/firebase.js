@@ -2,6 +2,7 @@
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/auth';
 import 'firebase/compat/firestore';
+import 'firebase/compat/database'; // Asegurarnos que la base de datos está importada
 import * as SecureStore from 'expo-secure-store';
 import Constants from 'expo-constants';
 
@@ -15,7 +16,9 @@ const getFirebaseConfig = () => {
       storageBucket: Constants.expoConfig.extra.FIREBASE_STORAGE_BUCKET,
       messagingSenderId: Constants.expoConfig.extra.FIREBASE_MESSAGING_SENDER_ID,
       appId: Constants.expoConfig.extra.FIREBASE_APP_ID,
-      measurementId: Constants.expoConfig.extra.FIREBASE_MEASUREMENT_ID
+      measurementId: Constants.expoConfig.extra.FIREBASE_MEASUREMENT_ID,
+      // Añadimos la URL específica de la región para Realtime Database
+      databaseURL: 'https://n-expo-default-rtdb.europe-west1.firebasedatabase.app'
     };
   }
 
@@ -26,7 +29,9 @@ const getFirebaseConfig = () => {
     storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
     messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
     appId: process.env.FIREBASE_APP_ID,
-    measurementId: process.env.FIREBASE_MEASUREMENT_ID
+    measurementId: process.env.FIREBASE_MEASUREMENT_ID,
+    // Añadimos la URL específica de la región para Realtime Database
+    databaseURL: 'https://n-expo-default-rtdb.europe-west1.firebasedatabase.app'
   };
 };
 

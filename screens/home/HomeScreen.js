@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, FlatList, StyleSheet, RefreshControl } from 'react-native';
 import { ActivityIndicator, Text } from 'react-native-paper';
-import { getTopHeadlines } from '../../services/newsService';
+import { getTopHeadlines, getUserRegion } from '../../services/newsService';
 import NewsCard from '../../components/NewsCard';
 import { COLORS } from '../../styles/theme';
 
@@ -12,6 +12,22 @@ const HomeScreen = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMoreData, setHasMoreData] = useState(true);
+  const [userRegion, setUserRegion] = useState('es');
+
+  // Obtener la región preferida del usuario
+  useEffect(() => {
+    const fetchUserRegion = async () => {
+      try {
+        const region = await getUserRegion();
+        setUserRegion(region);
+      } catch (error) {
+        console.error('Error al obtener la región del usuario:', error);
+        // Mantenemos 'es' como valor predeterminado si hay un error
+      }
+    };
+
+    fetchUserRegion();
+  }, []);
 
   const fetchNews = async (pageNum = 1, refresh = false) => {
     if (refresh) {
@@ -24,7 +40,8 @@ const HomeScreen = () => {
 
     try {
       setLoading(true);
-      const response = await getTopHeadlines('es', '', pageNum);
+      // Usamos la región del usuario
+      const response = await getTopHeadlines(userRegion, '', pageNum);
 
       if (refresh || pageNum === 1) {
         setNews(response.articles);
@@ -57,6 +74,12 @@ const HomeScreen = () => {
     }
   };
 
+  // Refrescar noticias cuando cambia la región
+  useEffect(() => {
+    fetchNews(1, true);
+  }, [userRegion]);
+
+  // Cargar noticias al montar el componente
   useEffect(() => {
     fetchNews();
   }, []);
@@ -80,7 +103,7 @@ const HomeScreen = () => {
       ) : (
         <FlatList
           data={news}
-          keyExtractor={(item, index) => `${item.title}-${index}`}
+          keyExtractor={(item) => item.id || `${item.title}-${Math.random()}`}
           renderItem={({ item }) => <NewsCard article={item} />}
           refreshControl={
             <RefreshControl
