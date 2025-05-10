@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { View, StyleSheet, Image, TouchableOpacity, StatusBar, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { TextInput, Button, Text, ActivityIndicator, Surface } from 'react-native-paper';
 import { loginUser } from '../../services/firebase';
@@ -10,6 +10,7 @@ const LoginScreen = ({ navigation }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [secureTextEntry, setSecureTextEntry] = useState(true);
+  const passwordInputRef = useRef(null);
 
   const validateForm = () => {
     if (!email || !password) {
@@ -56,10 +57,14 @@ const LoginScreen = ({ navigation }) => {
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={styles.container}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 40 : 0}
     >
       <StatusBar barStyle="light-content" />
       <View style={styles.backgroundView}>
-        <ScrollView contentContainerStyle={styles.scrollContainer}>
+        <ScrollView
+          contentContainerStyle={styles.scrollContainer}
+          keyboardShouldPersistTaps="handled"
+        >
           <View style={styles.logoContainer}>
             <Image
               source={require('../../assets/logo.png')}
@@ -93,6 +98,9 @@ const LoginScreen = ({ navigation }) => {
                   mode="outlined"
                   style={styles.textInput}
                   outlineColor={COLORS.border}
+                  returnKeyType="next"
+                  onSubmitEditing={() => passwordInputRef.current?.focus()}
+                  blurOnSubmit={false}
                   theme={{
                     roundness: 10,
                     colors: { onSurfaceVariant: COLORS.textSecondary }
@@ -106,6 +114,7 @@ const LoginScreen = ({ navigation }) => {
                   <TextInput.Icon icon="lock" color={COLORS.textSecondary} />
                 </View>
                 <TextInput
+                  ref={passwordInputRef}
                   label="Contraseña"
                   value={password}
                   onChangeText={setPassword}
@@ -114,6 +123,8 @@ const LoginScreen = ({ navigation }) => {
                   style={styles.textInput}
                   outlineColor={COLORS.border}
                   activeOutlineColor="#000000"
+                  returnKeyType="done"
+                  onSubmitEditing={handleLogin}
                   theme={{
                     roundness: 10,
                     colors: { onSurfaceVariant: COLORS.textSecondary }

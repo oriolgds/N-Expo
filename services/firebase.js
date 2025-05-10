@@ -2,7 +2,6 @@
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/auth';
 import 'firebase/compat/firestore';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 
 // Configuración de Firebase
@@ -40,8 +39,8 @@ if (!firebase.apps.length) {
     firebase.initializeApp(firebaseConfig);
     console.log("Firebase inicializado correctamente");
 
-    // Configuración opcional de persistencia
-    firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+    // Cambiamos el método de persistencia que causa problemas
+    firebase.auth().setPersistence(firebase.auth.Auth.Persistence.SESSION);
   } catch (error) {
     console.error("Error al inicializar Firebase:", error);
   }
@@ -54,28 +53,34 @@ if (!firebase.apps.length) {
 const auth = firebase.auth();
 const db = firebase.firestore();
 
-// Función para registrar usuarios
+// Función para registrar usuarios - siguiendo la documentación de Firestore
 export const registerUser = async (email, password, username) => {
   try {
+    // Crear el usuario en Authentication
     const userCredential = await auth.createUserWithEmailAndPassword(email, password);
+    const user = userCredential.user;
 
-    // Actualizar perfil con nombre de usuario
-    await userCredential.user.updateProfile({
+    // Normalizar el email para usarlo como referencia
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // Crear un documento en la colección 'users' con el correo como ID del documento
+    // Siguiendo el método de la documentación oficial
+    await db.collection('users').doc(normalizedEmail).set({
+      username: username,
+      uid: user.uid,
+      email: normalizedEmail,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+
+    // Actualizar el perfil del usuario en Authentication
+    await user.updateProfile({
       displayName: username
     });
 
-    // Guardar datos adicionales en Firestore
-    await db.collection("users").doc(userCredential.user.uid).set({
-      username,
-      email,
-      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-      likes: [],
-      comments: []
-    });
-
-    return userCredential.user;
+    console.log("Usuario registrado y datos guardados en Firestore");
+    return user;
   } catch (error) {
-    console.error("Error de registro:", error);
+    console.error("Error en el registro:", error);
     throw error;
   }
 };
@@ -107,10 +112,28 @@ export const subscribeToAuthChanges = (callback) => {
   return auth.onAuthStateChanged(callback);
 };
 
+// Actualizar función getUserData para buscar por email normalizado
 export const getUserData = async (userId) => {
   try {
+    // Primero intentamos buscar por userId
     const userDoc = await db.collection("users").doc(userId).get();
-    return userDoc.exists ? userDoc.data() : null;
+
+    if (userDoc.exists) {
+      return userDoc.data();
+    }
+
+    // Si no encontramos por userId, puede ser que estemos buscando con el uid
+    // en lugar del email. Hacemos una consulta por uid
+    const querySnapshot = await db.collection("users")
+      .where("uid", "==", userId)
+      .limit(1)
+      .get();
+
+    if (!querySnapshot.empty) {
+      return querySnapshot.docs[0].data();
+    }
+
+    return null;
   } catch (error) {
     console.error("Error al obtener datos de usuario:", error);
     throw error;
