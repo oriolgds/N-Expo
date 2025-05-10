@@ -13,10 +13,9 @@ import NewsCard from '../../components/NewsCard';
 import { COLORS } from '../../styles/theme';
 
 // Ajustar estas constantes para incluir el margen superior
-const HEADER_MAX_HEIGHT = 60;
-const HEADER_MIN_HEIGHT = 0;
-const HEADER_SCROLL_DISTANCE = HEADER_MAX_HEIGHT - HEADER_MIN_HEIGHT;
-const HEADER_MARGIN_TOP = Platform.OS === 'ios' ? 40 : 30; // Margen superior para evitar solaparse con la barra del sistema
+const HEADER_HEIGHT = 60; // Altura del contenido del header
+const HEADER_PADDING_TOP = Platform.OS === 'ios' ? 40 : 30; // Padding superior para evitar solaparse con la barra del sistema
+const HEADER_TOTAL_HEIGHT = HEADER_HEIGHT + HEADER_PADDING_TOP; // Altura total incluyendo padding
 
 const HomeScreen = () => {
   const [news, setNews] = useState([]);
@@ -30,11 +29,11 @@ const HomeScreen = () => {
 
   // Ref para la animación del scroll
   const scrollY = useRef(new Animated.Value(0)).current;
-  const scrollYClamped = Animated.diffClamp(scrollY, 0, HEADER_MARGIN_TOP + HEADER_MAX_HEIGHT);
+  const scrollYClamped = Animated.diffClamp(scrollY, 0, HEADER_TOTAL_HEIGHT);
 
   const translateY = scrollYClamped.interpolate({
-    inputRange: [0, HEADER_MARGIN_TOP + HEADER_MAX_HEIGHT],
-    outputRange: [0, -HEADER_MARGIN_TOP - HEADER_MAX_HEIGHT],
+    inputRange: [0, HEADER_TOTAL_HEIGHT],
+    outputRange: [0, -HEADER_TOTAL_HEIGHT],
     extrapolate: 'clamp',
   });
 
@@ -49,7 +48,7 @@ const HomeScreen = () => {
       listener: event => {
         const offsetY = event.nativeEvent.contentOffset.y;
         // Actualizar el valor clampedScrollY con el valor actual del scroll
-        clampedScrollY.setValue(Math.min(Math.max(0, offsetY), HEADER_MARGIN_TOP + HEADER_MAX_HEIGHT));
+        clampedScrollY.setValue(Math.min(Math.max(0, offsetY), HEADER_TOTAL_HEIGHT));
 
         // Determinar la dirección del scroll
         if (offsetY > clampedScrollY._value) {
@@ -200,7 +199,6 @@ const HomeScreen = () => {
           styles.header,
           {
             transform: [{ translateY }],
-            marginTop: HEADER_MARGIN_TOP,
           },
         ]}
       >
@@ -223,12 +221,12 @@ const HomeScreen = () => {
       <StatusBar backgroundColor={COLORS.background} barStyle="dark-content" />
 
       {error ? (
-        <View style={[styles.errorContainer, { marginTop: HEADER_MARGIN_TOP + HEADER_MAX_HEIGHT }]}>
+        <View style={[styles.errorContainer, { marginTop: HEADER_TOTAL_HEIGHT }]}>
           <Text style={styles.errorText}>{error}</Text>
         </View>
       ) : (
         <Animated.FlatList
-          contentContainerStyle={{ paddingTop: HEADER_MARGIN_TOP + HEADER_MAX_HEIGHT }}
+          contentContainerStyle={{ paddingTop: HEADER_TOTAL_HEIGHT }}
           data={news}
           keyExtractor={(item) => item?.id || `${item?.title || Math.random()}-${Math.random()}`}
           renderItem={renderItem}
@@ -238,7 +236,7 @@ const HomeScreen = () => {
               onRefresh={handleRefresh}
               colors={[COLORS.accent]}
               tintColor={COLORS.accent}
-              progressViewOffset={HEADER_MARGIN_TOP + HEADER_MAX_HEIGHT}
+              progressViewOffset={HEADER_TOTAL_HEIGHT}
             />
           }
           onEndReached={handleLoadMore}
@@ -274,7 +272,7 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    height: HEADER_MAX_HEIGHT,
+    height: HEADER_TOTAL_HEIGHT,
     backgroundColor: COLORS.background,
     zIndex: 1000,
     elevation: 4,
@@ -282,7 +280,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 2,
-    paddingTop: HEADER_MARGIN_TOP,
+    paddingTop: HEADER_PADDING_TOP, // Usamos paddingTop para evitar ver el fondo
   },
   headerContent: {
     flex: 1,
