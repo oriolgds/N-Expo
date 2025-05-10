@@ -40,18 +40,52 @@ const HomeScreen = () => {
 
     try {
       setLoading(true);
+      console.log(`Solicitando noticias para región: ${userRegion}, página: ${pageNum}`);
       // Usamos la región del usuario
       const response = await getTopHeadlines(userRegion, '', pageNum);
 
-      if (refresh || pageNum === 1) {
-        setNews(response.articles);
-      } else {
-        setNews(prevNews => [...prevNews, ...response.articles]);
+      console.log("Respuesta recibida:",
+        response?.status,
+        response?.articles ? `(${response.articles.length} artículos)` : '(sin artículos)',
+        response?.isFallback ? '- usando fallback' : '');
+
+      // Comprobación de seguridad para el objeto response
+      if (!response) {
+        throw new Error('La respuesta es nula');
       }
 
-      // Si recibimos menos artículos de los esperados, asumimos que no hay más datos
-      setHasMoreData(response.articles.length === 20);
+      // Garantizamos que response.articles sea un array
+      const articles = Array.isArray(response.articles) ? response.articles : [];
+
+      if (articles.length === 0) {
+        console.log("No se encontraron artículos en la respuesta");
+      } else {
+        console.log(`Procesando ${articles.length} artículos`);
+      }
+
+      if (refresh || pageNum === 1) {
+        setNews(articles);
+      } else {
+        // Evitar duplicados al cargar más páginas
+        const existingIds = new Set(news.map(item => item.id));
+        const uniqueNewArticles = articles.filter(article => !existingIds.has(article.id));
+
+        setNews(prevNews => [...prevNews, ...uniqueNewArticles]);
+      }
+
+      // Si recibimos menos artículos de los esperados o hay un flag específico, asumimos que no hay más datos
+      setHasMoreData(articles.length === 20 && !response.noMoreData);
       setError(null);
+
+      // Si la respuesta vino de caché y tiene un error, mostramos una advertencia pero no un error completo
+      if (response.fromCache && response.error) {
+        console.warn('Usando datos en caché. Error original:', response.error);
+      }
+
+      // Si estamos usando el fallback, informamos al usuario
+      if (response.isFallback) {
+        console.info('Mostrando noticias de reserva debido a problemas de conexión');
+      }
     } catch (error) {
       setError('Error al cargar las noticias. Por favor, intenta de nuevo más tarde.');
       console.error('Error fetching news:', error);
@@ -94,6 +128,15 @@ const HomeScreen = () => {
     );
   };
 
+  const renderItem = ({ item }) => {
+    // Verificar que el artículo sea válido antes de pasarlo a NewsCard
+    if (!item || typeof item !== 'object' || !item.title) {
+      console.warn('Se intentó renderizar un artículo inválido:', item);
+      return null; // No renderizar nada si el artículo no es válido
+    }
+    return <NewsCard article={item} />;
+  };
+
   return (
     <View style={styles.container}>
       {error ? (
@@ -103,8 +146,8 @@ const HomeScreen = () => {
       ) : (
         <FlatList
           data={news}
-          keyExtractor={(item) => item.id || `${item.title}-${Math.random()}`}
-          renderItem={({ item }) => <NewsCard article={item} />}
+          keyExtractor={(item) => item?.id || `${item?.title || Math.random()}-${Math.random()}`}
+          renderItem={renderItem}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}

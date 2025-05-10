@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, Image, TouchableOpacity, Modal } from 'react-native';
+import { View, StyleSheet, Image, TouchableOpacity, Modal, FlatList } from 'react-native';
 import { Card, Text, Button, IconButton, Divider, TextInput, ActivityIndicator } from 'react-native-paper';
 import { firebase } from '../services/firebase';
 import moment from 'moment';
@@ -9,12 +9,24 @@ import { toggleLikeArticle, toggleSaveArticle } from '../services/newsService';
 
 moment.locale('es');
 
-const NewsCard = ({ article }) => {
-  // Estados para manejar interacciones
-  const [liked, setLiked] = useState(article.social?.userLiked || false);
-  const [likesCount, setLikesCount] = useState(article.social?.likesCount || 0);
-  const [saved, setSaved] = useState(article.social?.isSaved || false);
-  const [commentsCount, setCommentsCount] = useState(article.social?.commentsCount || 0);
+const NewsCard = ({ article = {} }) => {
+  // Validar que el artículo tenga la estructura mínima requerida
+  if (!article || typeof article !== 'object') {
+    console.warn('NewsCard recibió un artículo inválido:', article);
+    return (
+      <Card style={styles.card} mode="outlined">
+        <Card.Content>
+          <Text>Error al cargar el artículo</Text>
+        </Card.Content>
+      </Card>
+    );
+  }
+
+  // Estados para manejar interacciones - con valores predeterminados seguros
+  const [liked, setLiked] = useState(article?.social?.userLiked || false);
+  const [likesCount, setLikesCount] = useState(article?.social?.likesCount || 0);
+  const [saved, setSaved] = useState(article?.social?.isSaved || false);
+  const [commentsCount, setCommentsCount] = useState(article?.social?.commentsCount || 0);
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [commentsVisible, setCommentsVisible] = useState(false);
@@ -215,11 +227,11 @@ const NewsCard = ({ article }) => {
 
       <Card.Content style={styles.content}>
         <View style={styles.sourceContainer}>
-          <Text style={styles.source}>{article.source.name}</Text>
+          <Text style={styles.source}>{article?.source?.name || 'Fuente desconocida'}</Text>
           <Text style={styles.date}>{formattedDate}</Text>
         </View>
 
-        <Text style={styles.title}>{article.title}</Text>
+        <Text style={styles.title}>{article.title || 'Sin título'}</Text>
 
         {expanded && article.description && (
           <Text style={styles.description}>{article.description}</Text>
