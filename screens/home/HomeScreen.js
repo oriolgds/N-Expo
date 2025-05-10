@@ -9,6 +9,8 @@ import {
   loadCachedNews,
   forceNewsUpdate,
   reloadNewsFromFirebase,
+  saveNewsToLocalCache,
+  getTopHeadlinesOptimized,
   NEWS_CATEGORIES
 } from '../../services/newsService';
 import NewsCard from '../../components/NewsCard';
@@ -80,45 +82,106 @@ const HomeScreen = () => {
     fetchUserRegion();
   }, []);
 
-  // Función para cargar noticias iniciales
+  // Registrar un callback global para actualizar la UI cuando haya nuevos datos
+  useEffect(() => {
+    // Callback para cuando los datos de una categoría se actualizan
+    window.categoryDataUpdatedCallback = (cacheKey, newArticles) => {
+      if (!newArticles || !Array.isArray(newArticles)) return;
+
+      // Solo actualizar si la categoría actual corresponde a la actualizada
+      const currentCacheKey = `${userRegion}_${selectedCategory || 'general'}`;
+      if (currentCacheKey === cacheKey) {
+        console.log('✅ Actualizando UI con nuevos datos de categoría');
+        setNews(newArticles);
+        // No mostrar spinner de refreshing para actualizaciones en segundo plano
+      }
+    };
+
+    // Callback para cuando los datos sociales se completan
+    window.socialDataLoadedCallback = (cacheKey, articlesWithSocial) => {
+      const currentCacheKey = `${userRegion}_${selectedCategory || 'general'}`;
+      if (currentCacheKey === cacheKey) {
+        console.log('✅ Actualizando UI con datos sociales');
+        setNews(articlesWithSocial);
+      }
+    };
+
+    // Limpieza de callbacks al desmontar
+    return () => {
+      window.categoryDataUpdatedCallback = null;
+      window.socialDataLoadedCallback = null;
+    };
+  }, [userRegion, selectedCategory]);
+
+  // Función para cargar noticias iniciales - optimizada
   const initialLoad = useCallback(async () => {
     try {
-      setLoading(true);
-      setPage(1); // Reset page cuando cambiamos de categoría
-
       console.log(`Iniciando carga para categoría: ${selectedCategory === '' ? 'top-news' : selectedCategory}`);
 
-      // Intentar cargar desde caché primero para mostrar algo rápidamente
-      const cachedNews = await loadCachedNews(userRegion, selectedCategory);
-
-      if (cachedNews && cachedNews.articles.length > 0) {
-        console.log(`Usando noticias en caché para carga inicial de categoría: ${selectedCategory === '' ? 'top-news' : selectedCategory}`);
-        setNews(cachedNews.articles);
-        setError(null);
-        // No establecemos loading=false aquí para evitar mostrar la UI como cargada cuando realmente
-        // estamos recargando en segundo plano
+      // Mostrar loader solo si no tenemos datos previos
+      if (news.length === 0) {
+        setLoading(true);
       }
 
-      // Independientemente de si tenemos caché, cargar datos frescos
-      console.log(`Solicitando datos frescos para: ${selectedCategory === '' ? 'top-news' : selectedCategory}`);
-      const response = await getTopHeadlines(userRegion, selectedCategory);
+      // Usar la función optimizada para obtener noticias
+      const response = await getTopHeadlinesOptimized(userRegion, selectedCategory);
 
       if (response && Array.isArray(response.articles)) {
-        console.log(`Recibidos ${response.articles.length} artículos frescos`);
-        setNews(response.articles);
-        setHasMoreData(response.articles.length === 20);
-        setError(null);
+        const count = response.articles.length;
+        console.log(`Recibidos ${count} artículos (${response.fromMemoryCache ? 'memoria' : response.fromCache ? 'caché' : 'frescos'})`);
+
+        // Si no hay artículos, mostrar un mensaje de error
+        if (count === 0) {
+          setError('No hay noticias disponibles para esta categoría');
+        } else {
+          // Actualizar estado con los nuevos artículos
+          setNews(response.articles);
+          setHasMoreData(count >= 20);
+          setError(null);
+
+          // No mostrar indicador de actualización para caché en memoria
+          // ya que esto sería demasiado intrusivo para una operación tan rápida
+          if (response.updating && !response.fromMemoryCache) {
+            console.log('Actualización en segundo plano en curso');
+          }
+        }
       } else {
-        console.error('La respuesta no contiene artículos válidos:', response);
+        console.error('La respuesta no contiene artículos válidos');
+        setError('Error al cargar noticias');
       }
     } catch (error) {
       console.error('Error cargando noticias:', error);
-      if (!news.length) {
+      if (news.length === 0) {
         setError('Error al cargar noticias. Intentando conectar en tiempo real...');
       }
     } finally {
-      console.log('Finalizando carga inicial');
       setLoading(false);
+    }
+  }, [userRegion, selectedCategory, news.length]);
+
+  // Pre-cargar categorías adyacentes cuando el usuario está en una categoría
+  useEffect(() => {
+    if (selectedCategory) {
+      // Obtener las categorías adyacentes a la actual
+      const categories = Object.keys(NEWS_CATEGORIES);
+      const currentIndex = categories.indexOf(selectedCategory);
+
+      if (currentIndex !== -1) {
+        // Determinar categorías adyacentes
+        const prevCategory = currentIndex > 0 ? categories[currentIndex - 1] : null;
+        const nextCategory = currentIndex < categories.length - 1 ? categories[currentIndex + 1] : null;
+
+        // Pre-cargar en segundo plano con un retraso para no interferir con la carga principal
+        setTimeout(() => {
+          // Para cada categoría adyacente, pre-cargar datos sin bloquear la UI
+          [prevCategory, nextCategory].filter(Boolean).forEach(category => {
+            console.log(`🔄 Pre-cargando categoría adyacente: ${category}`);
+            getTopHeadlinesOptimized(userRegion, category, 1).catch(() => {
+              // Ignorar errores en pre-carga
+            });
+          });
+        }, 2000); // Esperar 2 segundos después de que se cargue la categoría actual
+      }
     }
   }, [userRegion, selectedCategory]);
 
@@ -145,20 +208,27 @@ const HomeScreen = () => {
     try {
       console.log(`Pull-to-refresh para categoría: ${selectedCategory || 'general'}`);
       setRefreshing(true);
-      // Usamos reloadNewsFromFirebase para no consumir cuota de API
-      const response = await reloadNewsFromFirebase(userRegion, selectedCategory);
+
+      // Forzar actualización desde la fuente para obtener datos frescos
+      const response = await getTopHeadlines(userRegion, selectedCategory, 1, true);
 
       if (response && Array.isArray(response.articles)) {
-        console.log(`Recibidos ${response.articles.length} artículos desde Firebase para categoría: ${response.category || selectedCategory || 'general'}`);
-
+        console.log(`Recibidos ${response.articles.length} artículos frescos para categoría: ${selectedCategory || 'top-news'}`);
         setNews(response.articles);
         setHasMoreData(response.articles.length === 20);
         setError(null);
+
+        // Guardar en caché local para futuras visitas
+        await saveNewsToLocalCache(userRegion, selectedCategory, {
+          articles: response.articles,
+          totalResults: response.totalResults,
+          status: response.status
+        });
       } else {
         console.error("Error: respuesta sin artículos", response);
       }
     } catch (error) {
-      console.error('Error al refrescar desde Firebase:', error);
+      console.error('Error al refrescar noticias:', error);
     } finally {
       setRefreshing(false);
     }
@@ -188,20 +258,12 @@ const HomeScreen = () => {
     }
   };
 
+  // Modificar la función handleCategorySelect para evitar doble carga
   const handleCategorySelect = (category) => {
-    // Importante: diferenciar entre categoría "general" (con valor "general") y top-news (con valor "")
+    // Si ya estamos en esta categoría, no hacer nada o volver a top-news
     if (category === selectedCategory) {
-      // Si ya estamos en una categoría específica y hacemos clic en ella de nuevo, volver a top-news
       if (selectedCategory !== '') {
         console.log(`Deseleccionando categoría: ${selectedCategory} -> top-news`);
-
-        // Limpiar estado y preparar para cargar top-news
-        setNews([]);
-        setError(null);
-        setLoading(true);
-        setPage(1);
-
-        // Establecer categoría vacía para volver a top-news
         setSelectedCategory('');
       }
       return;
@@ -209,17 +271,63 @@ const HomeScreen = () => {
 
     console.log(`Cambiando categoría: ${selectedCategory === '' ? 'top-news' : selectedCategory} -> ${category || 'top-news'}`);
 
-    // Primero limpiar los artículos actuales para evitar mostrar datos incorrectos
-    setNews([]);
-    setError(null);
+    // Solo mostrar loader si no hay datos en caché de memoria (cambio rápido)
+    setNews([]); // Limpiar noticias actuales para evitar mostrar contenido incorrecto
     setLoading(true);
-
-    // Reiniciar página a 1 cuando cambia la categoría
     setPage(1);
-
-    // Cambiar la categoría (esto activará el useEffect que carga los datos)
     setSelectedCategory(category);
+
+    // Vamos a hacer una carga inmediata para mostrar resultados sin esperar al useEffect
+    getTopHeadlinesOptimized(userRegion, category).then(response => {
+      if (response && Array.isArray(response.articles)) {
+        setNews(response.articles);
+        setHasMoreData(response.articles.length >= 20);
+        setError(null);
+      }
+      setLoading(false);
+    }).catch(error => {
+      console.error('Error en cambio rápido de categoría:', error);
+      setLoading(false);
+    });
   };
+
+  // Optimizar el renderizado de la lista para evitar reconstrucciones innecesarias
+  const renderItem = useCallback(({ item }) => {
+    if (!item || typeof item !== 'object' || (!item.title && !item.isLoading)) {
+      return null;
+    }
+
+    // Si es un artículo de carga, mostrar un skeleton
+    if (item.isLoading) {
+      return (
+        <View style={styles.loadingCardContainer}>
+          <View style={styles.loadingCardHeader} />
+          <View style={styles.loadingCardTitle} />
+          <View style={styles.loadingCardContent} />
+        </View>
+      );
+    }
+
+    // Evita rerenderizaciones innecesarias pasando el artículo completo
+    return <NewsCard article={item} />;
+  }, []);
+
+  // Optimizar la función listEmptyComponent para no reconstruirse en cada render
+  const ListEmptyComponent = useCallback(() => {
+    if (loading) {
+      return (
+        <View style={styles.loaderContainer}>
+          <ActivityIndicator size="large" color={COLORS.accent} />
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.emptyContainer}>
+        <Text>No hay noticias disponibles para esta categoría</Text>
+      </View>
+    );
+  }, [loading]);
 
   const renderFooter = () => {
     if (!loading && !refreshing) return null;
@@ -229,13 +337,6 @@ const HomeScreen = () => {
         <ActivityIndicator color={COLORS.accent} />
       </View>
     );
-  };
-
-  const renderItem = ({ item }) => {
-    if (!item || typeof item !== 'object' || !item.title) {
-      return null;
-    }
-    return <NewsCard article={item} />;
   };
 
   // Navegar a la pantalla de perfil
@@ -345,21 +446,15 @@ const HomeScreen = () => {
           }
           onEndReached={handleLoadMore}
           onEndReachedThreshold={0.5}
-          ListFooterComponent={renderFooter}
-          ListEmptyComponent={
-            loading ? (
-              <View style={styles.loaderContainer}>
-                <ActivityIndicator size="large" color={COLORS.accent} />
-              </View>
-            ) : (
-              <View style={styles.emptyContainer}>
-                <Text>No hay noticias disponibles para esta categoría</Text>
-              </View>
-            )
-          }
-          // Conectar el scroll a la animación
+          ListFooterComponent={loading || refreshing ? renderFooter : null}
+          ListEmptyComponent={ListEmptyComponent}
           onScroll={handleScroll}
           scrollEventThrottle={16}
+          removeClippedSubviews={true}
+          maxToRenderPerBatch={8}
+          windowSize={10}
+          updateCellsBatchingPeriod={30}
+          initialNumToRender={6}
         />
       )}
     </View>
@@ -445,6 +540,38 @@ const styles = StyleSheet.create({
   footerLoader: {
     padding: 20,
     alignItems: 'center',
+  },
+  loadingCardContainer: {
+    backgroundColor: COLORS.background,
+    marginVertical: 8,
+    marginHorizontal: 16,
+    padding: 16,
+    borderRadius: 8,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 1,
+  },
+  loadingCardHeader: {
+    height: 14,
+    width: '40%',
+    backgroundColor: '#f0f0f0',
+    marginBottom: 10,
+    borderRadius: 4,
+  },
+  loadingCardTitle: {
+    height: 20,
+    width: '100%',
+    backgroundColor: '#f0f0f0',
+    marginBottom: 12,
+    borderRadius: 4,
+  },
+  loadingCardContent: {
+    height: 60,
+    width: '100%',
+    backgroundColor: '#f0f0f0',
+    borderRadius: 4,
   },
 });
 
