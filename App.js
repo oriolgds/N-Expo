@@ -2,52 +2,56 @@ import React, { useEffect, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { Provider as PaperProvider } from 'react-native-paper';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { LogBox, View, Text, ActivityIndicator } from 'react-native';
+import { LogBox, View, Text, ActivityIndicator, Image } from 'react-native';
 import AppNavigator from './navigation/AppNavigator';
 import { theme, COLORS } from './styles/theme';
 
 // Importamos Firebase (ya se inicializa en el archivo)
-import { firebase, auth } from './services/firebase';
+import { firebase } from './services/firebase';
 
-// Ignorar advertencias específicas que puedan estar relacionadas con Firebase
+// Ignorar advertencias específicas
 LogBox.ignoreLogs([
   'Setting a timer',
   'AsyncStorage has been extracted from react-native core',
   'Possible Unhandled Promise Rejection',
-  'Variant bodySmall was not provided properly', // Ignorar temporalmente mientras actualizamos el tema
+  'Variant bodySmall was not provided properly'
 ]);
 
 export default function App() {
-  const [isFirebaseReady, setIsFirebaseReady] = useState(false);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    // Verificamos que Firebase y Auth estén inicializados correctamente
-    const checkFirebase = async () => {
-      if (firebase.apps.length > 0 && auth) {
-        console.log('Firebase está inicializado correctamente');
-        setIsFirebaseReady(true);
-      } else {
-        console.warn('Firebase no está inicializado correctamente');
-        setTimeout(() => {
-          if (firebase.apps.length > 0 && auth) {
-            console.log('Firebase inicializado correctamente (intento posterior)');
-          } else {
-            console.error('No se pudo inicializar Firebase');
-          }
-          // Continuamos de todos modos para no bloquear la app
-          setIsFirebaseReady(true);
-        }, 2000);
-      }
-    };
+    // Simplemente esperar un tiempo mínimo para que todo se inicialice
+    const timer = setTimeout(() => {
+      setReady(true);
+    }, 1800);
 
-    checkFirebase();
+    return () => clearTimeout(timer);
   }, []);
 
-  if (!isFirebaseReady) {
+  if (!ready) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+      <View style={{
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: COLORS.background
+      }}>
+        {/* Aquí puedes usar tu logo */}
+        <Image
+          source={require('./assets/logo.png')}
+          style={{ width: 120, height: 120, marginBottom: 20 }}
+          resizeMode="contain"
+        />
         <ActivityIndicator size="large" color={COLORS.accent} />
-        <Text style={{ marginTop: 10 }}>Inicializando Firebase...</Text>
+        <Text style={{
+          marginTop: 15,
+          fontSize: 16,
+          fontWeight: 'bold',
+          color: COLORS.primary
+        }}>
+          Cargando N-Expo...
+        </Text>
       </View>
     );
   }

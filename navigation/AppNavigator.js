@@ -83,80 +83,53 @@ const HomeStack = () => {
 const AppNavigator = () => {
   const [initializing, setInitializing] = useState(true);
   const [user, setUser] = useState(null);
-  const [appReady, setAppReady] = useState(false); // Estado adicional para la inicialización completa
+  const [appReady, setAppReady] = useState(false);
 
   useEffect(() => {
     // Función para inicializar y restaurar la sesión
-    const initializeAuth = async () => {
-      if (!auth) {
-        console.warn('Auth object is not initialized yet');
-        return;
-      }
-
+    const initializeApp = async () => {
       try {
-        // Intentar restaurar la sesión guardada
+        // Intentar restaurar sesión sin mostrar loader extra
         const savedUser = await restoreSession();
-
-        // Si restauramos un usuario
         if (savedUser) {
-          console.log("Sesión restaurada para:", savedUser.email || savedUser.uid);
           setUser(savedUser);
         }
 
-        // Siempre escuchar cambios de autenticación para mantener sincronizado
-        const unsubscribe = subscribeToAuthChanges((currentUser) => {
-          console.log('Estado de autenticación cambiado:', currentUser ? currentUser.email : 'No autenticado');
+        // Iniciar sistema de noticias en paralelo
+        import('../services/newsService')
+          .then(module => {
+            return module.initNewsSystem();
+          })
+          .catch(err => {
+            console.error('Error al inicializar sistema de noticias:', err);
+          });
 
-          // Si Firebase nos envía un usuario autenticado, tiene prioridad
-          if (currentUser) {
-            setUser(currentUser);
-          } else if (user && !auth.currentUser) {
-            // Si teníamos un usuario pero Firebase dice que no hay nadie autenticado
-            // Solo actualizamos si proviene de un evento real de autenticación
-            setUser(null);
-          }
-
-          // Marcar la inicialización como completa
-          setInitializing(false);
-          setAppReady(true);
+        // Suscribirse a cambios de autenticación
+        const unsubscribe = subscribeToAuthChanges((authUser) => {
+          setUser(authUser);
+          if (initializing) setInitializing(false);
         });
 
-        // Timeout de seguridad reducido ya que ahora tenemos estado appReady
-        const timeout = setTimeout(() => {
-          if (initializing) {
-            console.warn('Auth initialization timed out');
-            setInitializing(false);
-            setAppReady(true);
-          }
-        }, 10000);
+        // Marcar app como lista después de un tiempo mínimo para evitar parpadeos
+        setTimeout(() => {
+          setInitializing(false);
+          setAppReady(true);
+        }, 800);
 
-        return () => {
-          unsubscribe();
-          clearTimeout(timeout);
-        };
+        return unsubscribe;
       } catch (error) {
-        console.error("Error durante la inicialización de autenticación:", error);
+        console.error("Error durante la inicialización:", error);
         setInitializing(false);
         setAppReady(true);
       }
     };
 
-    initializeAuth();
+    initializeApp();
   }, []);
 
-  // Debug del estado de autenticación
-  useEffect(() => {
-    console.log('Estado de usuario en AppNavigator:', user ? 'Autenticado' : 'No autenticado');
-  }, [user]);
-
-  if (!appReady) {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: COLORS.background }}>
-        <ActivityIndicator size="large" color={COLORS.accent} />
-        <Text style={{ marginTop: 10, color: COLORS.textSecondary }}>Cargando...</Text>
-      </View>
-    );
-  }
+  // Skip rendering anything if initialization is still happening
+  // La pantalla de carga principal estará en App.js
+  if (!appReady) return null;
 
   return (
     <NavigationContainer>

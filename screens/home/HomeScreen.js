@@ -1,15 +1,21 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { View, FlatList, StyleSheet, RefreshControl } from 'react-native';
 import { ActivityIndicator, Text } from 'react-native-paper';
-import { getTopHeadlines, getUserRegion } from '../../services/newsService';
+import {
+  getTopHeadlines,
+  getUserRegion,
+  subscribeToNewsUpdates,
+  loadCachedNews,
+  forceNewsUpdate
+} from '../../services/newsService';
 import NewsCard from '../../components/NewsCard';
 import { COLORS } from '../../styles/theme';
 
 const HomeScreen = () => {
   const [news, setNews] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState(null);
   const [page, setPage] = useState(1);
   const [hasMoreData, setHasMoreData] = useState(true);
   const [userRegion, setUserRegion] = useState('es');
@@ -22,104 +28,107 @@ const HomeScreen = () => {
         setUserRegion(region);
       } catch (error) {
         console.error('Error al obtener la región del usuario:', error);
-        // Mantenemos 'es' como valor predeterminado si hay un error
       }
     };
 
     fetchUserRegion();
   }, []);
 
-  const fetchNews = async (pageNum = 1, refresh = false) => {
-    if (refresh) {
-      setPage(1);
-      pageNum = 1;
-      setNews([]);
-    }
-
-    if (!hasMoreData && pageNum > 1) return;
-
+  // Función para cargar noticias iniciales
+  const initialLoad = useCallback(async () => {
     try {
       setLoading(true);
-      console.log(`Solicitando noticias para región: ${userRegion}, página: ${pageNum}`);
-      // Usamos la región del usuario
-      const response = await getTopHeadlines(userRegion, '', pageNum);
 
-      console.log("Respuesta recibida:",
-        response?.status,
-        response?.articles ? `(${response.articles.length} artículos)` : '(sin artículos)',
-        response?.isFallback ? '- usando fallback' : '');
+      // Intentar cargar desde caché primero para mostrar algo rápidamente
+      const cachedNews = await loadCachedNews(userRegion);
 
-      // Comprobación de seguridad para el objeto response
-      if (!response) {
-        throw new Error('La respuesta es nula');
+      if (cachedNews && cachedNews.articles.length > 0) {
+        console.log('Usando noticias en caché para carga inicial');
+        setNews(cachedNews.articles);
+        setError(null);
+        setLoading(false);
       }
 
-      // Garantizamos que response.articles sea un array
-      const articles = Array.isArray(response.articles) ? response.articles : [];
+      // Independientemente de si tenemos caché, cargar datos frescos
+      const response = await getTopHeadlines(userRegion);
 
-      if (articles.length === 0) {
-        console.log("No se encontraron artículos en la respuesta");
-      } else {
-        console.log(`Procesando ${articles.length} artículos`);
-      }
-
-      if (refresh || pageNum === 1) {
-        setNews(articles);
-      } else {
-        // Evitar duplicados al cargar más páginas
-        const existingIds = new Set(news.map(item => item.id));
-        const uniqueNewArticles = articles.filter(article => !existingIds.has(article.id));
-
-        setNews(prevNews => [...prevNews, ...uniqueNewArticles]);
-      }
-
-      // Si recibimos menos artículos de los esperados o hay un flag específico, asumimos que no hay más datos
-      setHasMoreData(articles.length === 20 && !response.noMoreData);
-      setError(null);
-
-      // Si la respuesta vino de caché y tiene un error, mostramos una advertencia pero no un error completo
-      if (response.fromCache && response.error) {
-        console.warn('Usando datos en caché. Error original:', response.error);
-      }
-
-      // Si estamos usando el fallback, informamos al usuario
-      if (response.isFallback) {
-        console.info('Mostrando noticias de reserva debido a problemas de conexión');
+      if (response && Array.isArray(response.articles)) {
+        setNews(response.articles);
+        setHasMoreData(response.articles.length === 20);
+        setError(null);
       }
     } catch (error) {
-      setError('Error al cargar las noticias. Por favor, intenta de nuevo más tarde.');
-      console.error('Error fetching news:', error);
+      console.error('Error cargando noticias:', error);
+      if (!news.length) {
+        setError('Error al cargar noticias. Intentando conectar en tiempo real...');
+      }
     } finally {
       setLoading(false);
-      setRefreshing(false);
     }
-  };
-
-  const handleRefresh = () => {
-    setRefreshing(true);
-    fetchNews(1, true);
-  };
-
-  const handleLoadMore = () => {
-    if (!loading && hasMoreData) {
-      const nextPage = page + 1;
-      setPage(nextPage);
-      fetchNews(nextPage);
-    }
-  };
-
-  // Refrescar noticias cuando cambia la región
-  useEffect(() => {
-    fetchNews(1, true);
   }, [userRegion]);
 
-  // Cargar noticias al montar el componente
+  // Cargar datos iniciales y configurar suscripción en tiempo real
   useEffect(() => {
-    fetchNews();
-  }, []);
+    // Carga inicial
+    initialLoad();
+
+    // Configurar suscripción en tiempo real
+    const unsubscribe = subscribeToNewsUpdates(userRegion, (updatedData) => {
+      if (updatedData && Array.isArray(updatedData.articles)) {
+        console.log('Recibida actualización automática de noticias');
+        setNews(updatedData.articles);
+        setError(null);
+      }
+    });
+
+    // Limpiar suscripción al desmontar
+    return () => unsubscribe();
+  }, [userRegion, initialLoad]);
+
+  // Manejar el pull-to-refresh
+  const handleRefresh = useCallback(async () => {
+    try {
+      setRefreshing(true);
+      const response = await forceNewsUpdate(userRegion);
+
+      if (response && Array.isArray(response.articles)) {
+        setNews(response.articles);
+        setHasMoreData(response.articles.length === 20);
+        setError(null);
+      }
+    } catch (error) {
+      console.error('Error al refrescar:', error);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [userRegion]);
+
+  const handleLoadMore = async () => {
+    if (loading || refreshing || !hasMoreData) return;
+
+    try {
+      const nextPage = page + 1;
+      setPage(nextPage);
+
+      const response = await getTopHeadlines(userRegion, '', nextPage);
+
+      if (response && Array.isArray(response.articles)) {
+        const newArticles = response.articles;
+
+        // Evitar duplicados al cargar más páginas
+        const existingIds = new Set(news.map(item => item.id));
+        const uniqueNewArticles = newArticles.filter(article => !existingIds.has(article.id));
+
+        setNews(prevNews => [...prevNews, ...uniqueNewArticles]);
+        setHasMoreData(newArticles.length === 20);
+      }
+    } catch (error) {
+      console.error('Error cargando más noticias:', error);
+    }
+  };
 
   const renderFooter = () => {
-    if (!loading || refreshing) return null;
+    if (!loading && !refreshing) return null;
 
     return (
       <View style={styles.footerLoader}>
@@ -129,10 +138,8 @@ const HomeScreen = () => {
   };
 
   const renderItem = ({ item }) => {
-    // Verificar que el artículo sea válido antes de pasarlo a NewsCard
     if (!item || typeof item !== 'object' || !item.title) {
-      console.warn('Se intentó renderizar un artículo inválido:', item);
-      return null; // No renderizar nada si el artículo no es válido
+      return null;
     }
     return <NewsCard article={item} />;
   };
@@ -153,6 +160,7 @@ const HomeScreen = () => {
               refreshing={refreshing}
               onRefresh={handleRefresh}
               colors={[COLORS.accent]}
+              tintColor={COLORS.accent}
             />
           }
           onEndReached={handleLoadMore}

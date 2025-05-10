@@ -3,29 +3,178 @@ import Constants from 'expo-constants';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/auth';
 import 'firebase/compat/firestore';
-import 'firebase/compat/database'; // Importación necesaria para Realtime Database
+import 'firebase/compat/database';
 import { firebase as firebaseInstance, auth, db } from './firebase';
 import moment from 'moment';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Configuración de la API
-const API_KEY = Constants.expoConfig.extra.NEWS_API_KEY || 'ba82b8ff860c435880ddd0f7bf393dd3';
-const BASE_URL = 'https://newsapi.org/v2';
+// Configuración de la nueva API (WorldNewsAPI)
+// Verificar si obtenemos la API key correctamente y asegurarnos de mostrar errores de configuración
+const API_KEY = Constants.expoConfig?.extra?.WORLD_NEWS_API_KEY;
+if (!API_KEY) {
+    console.error('¡ADVERTENCIA! API_KEY para WorldNewsAPI no encontrada en la configuración');
+}
+const BASE_URL = 'https://api.worldnewsapi.com';
+
+console.log('API Key configurada:', API_KEY ? '✓ OK' : '✗ No encontrada');
 
 // Referencias a Firebase - Corregidas
 const database = firebaseInstance.database ? firebaseInstance.database() : firebase.database();
 const firestore = db || firebaseInstance.firestore();
 
+// Claves para caché local
+const LOCAL_CACHE_KEY_PREFIX = 'news_cache_';
+const CACHE_TIMESTAMP_KEY = 'news_cache_timestamp';
+
 /**
- * Comprueba y recupera noticias en caché o hace una nueva solicitud
+ * Inicializa el sistema de caché y sincronización
+ * Debe llamarse al inicio de la aplicación
+ */
+export const initNewsSystem = async () => {
+    try {
+        console.log('Inicializando sistema de noticias...');
+
+        // Restaurar caché al iniciar
+        const timestamp = await AsyncStorage.getItem(CACHE_TIMESTAMP_KEY);
+
+        if (timestamp) {
+            const lastUpdate = parseInt(timestamp);
+            const now = Date.now();
+            const cacheAge = now - lastUpdate;
+
+            // Si la caché es reciente (menos de 30 minutos), usarla
+            if (cacheAge < 1800000) {
+                console.log('Caché local válida, edad:', Math.floor(cacheAge / 60000), 'minutos');
+                return true;
+            }
+        }
+
+        return false;
+    } catch (error) {
+        console.error('Error al inicializar el sistema de noticias:', error);
+        return false;
+    }
+};
+
+/**
+ * Suscribirse a actualizaciones en tiempo real de noticias
+ * @param {string} country - Código de país (ej: 'es')
+ * @param {function} callback - Función a llamar cuando hay nuevas noticias
+ * @returns {function} - Función para desuscribirse
+ */
+export const subscribeToNewsUpdates = (country = 'es', callback) => {
+    const countryCode = country.toLowerCase();
+    const cacheKey = `headlines_${countryCode}_1`;
+    const newsRef = database.ref(`news_cache/${cacheKey}`);
+
+    console.log(`Suscribiéndose a actualizaciones de noticias para ${countryCode}...`);
+
+    // Escuchar cambios en la base de datos en tiempo real
+    const listener = newsRef.on('value', async (snapshot) => {
+        try {
+            const data = snapshot.val();
+            if (data && data.articles && Array.isArray(data.articles)) {
+                console.log(`Recibida actualización con ${data.articles.length} artículos`);
+
+                // Actualizar caché local
+                await AsyncStorage.setItem(
+                    `${LOCAL_CACHE_KEY_PREFIX}${countryCode}`,
+                    JSON.stringify(data)
+                );
+                await AsyncStorage.setItem(CACHE_TIMESTAMP_KEY, Date.now().toString());
+
+                // Procesar artículos con datos sociales
+                const articlesWithSocial = await addSocialDataToArticles(data.articles);
+
+                // Llamar callback con datos actualizados
+                callback({
+                    articles: articlesWithSocial,
+                    totalResults: data.totalResults || articlesWithSocial.length,
+                    status: 'ok'
+                });
+            }
+        } catch (error) {
+            console.error('Error procesando actualización de noticias:', error);
+        }
+    });
+
+    // Devolver función para cancelar la suscripción
+    return () => {
+        console.log(`Cancelando suscripción a noticias para ${countryCode}`);
+        newsRef.off('value', listener);
+    };
+};
+
+/**
+ * Carga noticias desde caché local si están disponibles
+ * @param {string} country - Código del país
+ * @returns {Promise<Object|null>} - Datos de noticias o null si no hay caché
+ */
+export const loadCachedNews = async (country = 'es') => {
+    try {
+        const countryCode = country.toLowerCase();
+        const cacheKey = `${LOCAL_CACHE_KEY_PREFIX}${countryCode}`;
+
+        const cachedData = await AsyncStorage.getItem(cacheKey);
+        if (!cachedData) return null;
+
+        const parsedData = JSON.parse(cachedData);
+
+        // Verificar que los datos sean válidos
+        if (parsedData && parsedData.articles && Array.isArray(parsedData.articles)) {
+            // Procesar con datos sociales actuales
+            const articlesWithSocial = await addSocialDataToArticles(parsedData.articles);
+
+            return {
+                articles: articlesWithSocial,
+                totalResults: parsedData.totalResults || articlesWithSocial.length,
+                status: 'ok',
+                fromCache: true
+            };
+        }
+
+        return null;
+    } catch (error) {
+        console.error('Error cargando noticias desde caché:', error);
+        return null;
+    }
+};
+
+/**
+ * Forzar una actualización de noticias (útil para botón manual de refresco)
+ * @param {string} country - Código del país
+ * @param {string} category - Categoría (opcional)
+ * @returns {Promise<Object>} - Datos de noticias actualizados
+ */
+export const forceNewsUpdate = async (country = 'es', category = '') => {
+    try {
+        console.log('Forzando actualización de noticias...');
+        const result = await getTopHeadlines(country, category, 1, true);
+        return result;
+    } catch (error) {
+        console.error('Error al forzar actualización:', error);
+        throw error;
+    }
+};
+
+/**
+ * Comprueba y recupera noticias usando WorldNewsAPI
  * @param {string} country - Código del país (ej. 'us', 'es')
- * @param {string} category - Categoría (ej. 'technology', 'sports')
- * @param {number} page - Número de página (paginación)
+ * @param {string} category - Categoría (opcional)
+ * @param {number} page - Número de página
+ * @param {boolean} forceUpdate - Forzar actualización
  * @returns {Promise} - Datos de las noticias
  */
-export const getTopHeadlines = async (country = 'es', category = '', page = 1) => {
+export const getTopHeadlines = async (country = 'es', category = '', page = 1, forceUpdate = false) => {
     try {
-        // Asegurar que el país esté en minúsculas (requerido por la API)
-        const countryCode = country.toLowerCase();
+        // Asegurar que el país esté en minúsculas y sea válido
+        let countryCode = country && country.toLowerCase();
+
+        // Validar que el código de país no esté vacío
+        if (!countryCode || countryCode.trim() === '') {
+            console.log('Código de país vacío, usando "es" por defecto');
+            countryCode = 'es';
+        }
 
         // Generamos una clave única para este conjunto de parámetros
         const cacheKey = `headlines_${countryCode}_${category}_${page}`;
@@ -33,8 +182,217 @@ export const getTopHeadlines = async (country = 'es', category = '', page = 1) =
 
         console.log(`Obteniendo titulares para país: ${countryCode}, categoría: ${category || 'general'}, página: ${page}`);
 
-        // PASO 1: Comprobar si hay datos en caché y si son recientes (menos de 15 minutos)
-        console.log('Verificando caché para:', cacheKey);
+        // PASO 1: Comprobar si hay datos en caché y si son recientes
+        if (!forceUpdate) {
+            const snapshot = await cacheRef.once('value');
+            const cachedData = snapshot.val();
+
+            const now = moment();
+            const isCacheValid = cachedData &&
+                cachedData.timestamp &&
+                moment(cachedData.timestamp).add(15, 'minutes').isAfter(now);
+
+            if (isCacheValid) {
+                console.log('Usando datos en caché para:', cacheKey);
+
+                if (cachedData.articles && Array.isArray(cachedData.articles) && cachedData.articles.length > 0) {
+                    console.log(`Caché válida encontrada con ${cachedData.articles.length} artículos`);
+                    const articlesWithSocial = await addSocialDataToArticles(cachedData.articles);
+                    return {
+                        status: cachedData.status || 'ok',
+                        totalResults: cachedData.totalResults || articlesWithSocial.length,
+                        articles: articlesWithSocial
+                    };
+                } else {
+                    console.log('La caché tiene formato incorrecto o está vacía, recargando datos');
+                }
+            } else {
+                console.log('La caché ha expirado o no existe, solicitando datos nuevos');
+            }
+        }
+
+        // PASO 2: Hacer solicitud directamente a la API
+        const apiUrl = `${BASE_URL}/top-news`;
+
+        // CORREGIDO: Usar "source-country" (singular) en lugar de "source-countries" (plural)
+        const fullUrl = `${apiUrl}?api-key=${API_KEY}&source-country=${countryCode}&language=es&number=20&offset=${(page - 1) * 20}`;
+
+        console.log(`Haciendo petición a: ${apiUrl}`);
+        console.log(`Usando país: "${countryCode}"`);
+
+        const response = await axios.get(fullUrl);
+
+        console.log(`Respuesta API [${response.status}]:`, JSON.stringify(response.data).substring(0, 150) + '...');
+
+        // Adaptar la estructura de respuesta según el endpoint usado (search-news)
+        let adaptedArticles = [];
+        if (response.data && response.data.news) {
+            // Adaptar directamente desde el formato search-news
+            adaptedArticles = response.data.news.map(article => ({
+                id: article.id.toString(),
+                title: article.title,
+                description: article.summary || article.text?.substring(0, 150),
+                url: article.url,
+                urlToImage: article.image,
+                publishedAt: article.publish_date,
+                content: article.text,
+                author: article.author || (article.authors && article.authors.length > 0 ? article.authors[0] : ''),
+                source: {
+                    id: null,
+                    name: extractDomainFromUrl(article.url)
+                }
+            }));
+        } else if (response.data && response.data.top_news) {
+            // Mantener la adaptación para top-news si ese endpoint funciona
+            adaptedArticles = adaptWorldNewsApiResponse(response.data);
+        }
+
+        if (adaptedArticles.length === 0) {
+            console.log('No se encontraron artículos, usando fallback');
+            const fallbackArticles = getFallbackHeadlines();
+            await updateNewsCache(cacheKey, fallbackArticles, countryCode);
+            const articlesWithSocial = await addSocialDataToArticles(fallbackArticles);
+            return {
+                status: 'ok',
+                totalResults: fallbackArticles.length,
+                articles: articlesWithSocial,
+                isFallback: true
+            };
+        }
+
+        const articlesWithIds = adaptedArticles.map(article => ({
+            ...article,
+            id: article.id || generateArticleId(article),
+        }));
+
+        await updateNewsCache(cacheKey, articlesWithIds, countryCode);
+        const articlesWithSocial = await addSocialDataToArticles(articlesWithIds);
+
+        return {
+            status: 'ok',
+            totalResults: articlesWithIds.length,
+            articles: articlesWithSocial
+        };
+
+    } catch (error) {
+        console.error('Error al obtener noticias destacadas:', error);
+
+        // Mostrar información más detallada sobre el error
+        if (error.response) {
+            console.error('Respuesta de error:', error.response.status, error.response.data);
+            console.error('Headers:', error.response.headers);
+        } else if (error.request) {
+            console.error('No se recibió respuesta de la API:', error.request);
+        } else {
+            console.error('Error en la solicitud:', error.message);
+        }
+
+        // Usar noticias de fallback cuando hay error
+        const fallbackArticles = getFallbackHeadlines();
+        const articlesWithSocial = await addSocialDataToArticles(fallbackArticles);
+
+        return {
+            status: 'ok',
+            totalResults: fallbackArticles.length,
+            articles: articlesWithSocial,
+            isFallback: true
+        };
+    }
+};
+
+/**
+ * Actualiza la caché de noticias en Firebase y localmente
+ * @param {string} cacheKey - Clave para la caché
+ * @param {Array} articles - Artículos a guardar
+ * @param {string} countryCode - Código de país para caché local
+ */
+const updateNewsCache = async (cacheKey, articles, countryCode) => {
+    try {
+        const dataToCache = {
+            articles: articles,
+            timestamp: Date.now(),
+            totalResults: articles.length
+        };
+
+        const cacheRef = database.ref(`news_cache/${cacheKey}`);
+        await cacheRef.set(dataToCache);
+
+        await AsyncStorage.setItem(
+            `${LOCAL_CACHE_KEY_PREFIX}${countryCode}`,
+            JSON.stringify(dataToCache)
+        );
+        await AsyncStorage.setItem(CACHE_TIMESTAMP_KEY, Date.now().toString());
+
+        console.log(`Caché actualizada con ${dataToCache.articles.length} artículos`);
+    } catch (error) {
+        console.error('Error al guardar caché:', error);
+    }
+};
+
+/**
+ * Adapta la respuesta de WorldNewsAPI al formato que usa nuestra app
+ * @param {Object} response - Respuesta de WorldNewsAPI
+ * @returns {Array} - Artículos adaptados
+ */
+const adaptWorldNewsApiResponse = (response) => {
+    const newsArray = [];
+
+    if (response.top_news && Array.isArray(response.top_news)) {
+        response.top_news.forEach(cluster => {
+            if (cluster.news && Array.isArray(cluster.news)) {
+                const mainArticle = cluster.news[0];
+
+                if (mainArticle) {
+                    newsArray.push({
+                        id: mainArticle.id.toString(),
+                        title: mainArticle.title,
+                        description: mainArticle.summary || mainArticle.text?.substring(0, 150),
+                        url: mainArticle.url,
+                        urlToImage: mainArticle.image,
+                        publishedAt: mainArticle.publish_date,
+                        content: mainArticle.text,
+                        author: mainArticle.author || (mainArticle.authors && mainArticle.authors.length > 0 ? mainArticle.authors[0] : ''),
+                        source: {
+                            id: null,
+                            name: extractDomainFromUrl(mainArticle.url)
+                        },
+                        relatedArticles: cluster.news.slice(1).map(article => ({
+                            id: article.id.toString(),
+                            title: article.title,
+                            url: article.url
+                        }))
+                    });
+                }
+            }
+        });
+    }
+
+    return newsArray;
+};
+
+/**
+ * Extrae el dominio de una URL para usarlo como nombre de fuente
+ * @param {string} url - URL del artículo
+ * @returns {string} - Nombre de dominio
+ */
+const extractDomainFromUrl = (url) => {
+    try {
+        if (!url) return 'Fuente desconocida';
+        const domain = new URL(url).hostname;
+        return domain.replace('www.', '');
+    } catch (e) {
+        return 'Fuente desconocida';
+    }
+};
+
+/**
+ * Busca noticias por término de búsqueda usando WorldNewsAPI
+ */
+export const searchNews = async (query, page = 1) => {
+    try {
+        const cacheKey = `search_${query.toLowerCase().replace(/\s+/g, '_')}_${page}`;
+        const cacheRef = database.ref(`news_cache/${cacheKey}`);
+
         const snapshot = await cacheRef.once('value');
         const cachedData = snapshot.val();
 
@@ -43,236 +401,83 @@ export const getTopHeadlines = async (country = 'es', category = '', page = 1) =
             cachedData.timestamp &&
             moment(cachedData.timestamp).add(15, 'minutes').isAfter(now);
 
-        // PASO 2: Si tenemos caché válida, la usamos directamente
         if (isCacheValid) {
-            console.log('Usando datos en caché para:', cacheKey);
+            console.log('Usando búsqueda en caché para:', query);
 
-            // Aseguramos que la estructura de datos sea correcta
-            if (cachedData.articles && Array.isArray(cachedData.articles) && cachedData.articles.length > 0) {
-                console.log(`Caché válida encontrada con ${cachedData.articles.length} artículos`);
-                // Actualizar datos sociales de los artículos
+            if (cachedData.articles && cachedData.articles.length > 0) {
                 const articlesWithSocial = await addSocialDataToArticles(cachedData.articles);
-                return {
-                    status: cachedData.status || 'ok',
-                    totalResults: cachedData.totalResults || articlesWithSocial.length,
-                    articles: articlesWithSocial
-                };
-            } else {
-                console.log('La caché tiene formato incorrecto o está vacía, recargando datos');
+                return { ...cachedData, articles: articlesWithSocial };
             }
-        } else {
-            console.log('La caché ha expirado o no existe, solicitando datos nuevos');
+
+            return cachedData;
         }
 
-        // PASO 3: Hacer solicitud directamente a la API
-        const apiUrl = `${BASE_URL}/top-headlines`;
-        console.log(`Haciendo petición a: ${apiUrl}`);
-        console.log('Parámetros:', { country: countryCode, category, page, pageSize: 20, language: 'es' });
+        // Usar el endpoint de búsqueda que ya sabemos que funciona
+        const fullUrl = `${BASE_URL}/search-news?api-key=${API_KEY}&source-country=es&language=es&number=20&offset=${(page - 1) * 20}&text=${encodeURIComponent(query)}`;
 
-        const requestConfig = {
-            params: {
-                country: countryCode,
-                pageSize: 20,
-                page: page,
-                apiKey: API_KEY,
-                language: 'es', // Añadir parámetro explícito de idioma español
-            },
+        const response = await axios.get(fullUrl, {
             headers: {
                 'Content-Type': 'application/json',
-                'User-Agent': 'N-Expo-App/1.0'
+                'User-Agent': 'N-Expo-App/1.0',
+                'x-api-key': API_KEY
             }
-        };
+        });
 
-        // Si hay categoría, la agregamos a los parámetros
-        if (category && category.trim() !== '') {
-            requestConfig.params.category = category;
-        }
-
-        // Hacemos la petición con la configuración completa
-        const response = await axios.get(apiUrl, requestConfig);
-
-        // PASO 4: Verificamos la respuesta de la API
-        console.log(`Respuesta API [${response.status}]:`, JSON.stringify(response.data).substring(0, 150) + '...');
-
-        if (!response.data) {
-            throw new Error('La API no devolvió datos');
-        }
-
-        if (response.data.status !== 'ok') {
-            console.error('Error de API:', response.data.message || 'Error desconocido');
-            throw new Error(response.data.message || 'Error en la respuesta de la API');
-        }
-
-        if (!response.data.articles || !Array.isArray(response.data.articles)) {
-            console.error('La API no devolvió un array de artículos:', response.data);
-            throw new Error('Formato de respuesta incorrecto');
-        }
-
-        console.log(`API devolvió ${response.data.articles.length} artículos de ${response.data.totalResults} totales`);
-
-        // Si no hay artículos, probamos con otros parámetros pero manteniéndonos en español
-        if (response.data.articles.length === 0) {
-            console.log('No se encontraron artículos, probando con fallback');
-
-            // Intentar primero sin país pero con fuentes españolas populares
-            console.log('Probando con medios españoles específicos como fallback');
-            const spanishSources = 'el-mundo,el-pais,marca,as,20-minutos,el-confidencial,abc-es,la-vanguardia';
-            const spanishSourcesResponse = await axios.get(apiUrl, {
-                params: {
-                    sources: spanishSources,
-                    pageSize: 20,
-                    page: 1,
-                    apiKey: API_KEY,
-                    language: 'es'
-                },
-                headers: requestConfig.headers
-            });
-
-            if (spanishSourcesResponse.data.articles && spanishSourcesResponse.data.articles.length > 0) {
-                response.data = spanishSourcesResponse.data;
-                console.log(`Fallback con medios españoles exitoso: ${response.data.articles.length} artículos encontrados`);
-            }
-            // Si no encontramos con medios españoles, probar con medios en español de otros países
-            else if (countryCode !== 'mx' && page === 1) {
-                console.log('Probando con país MX como fallback (español)');
-                const mexicoResponse = await axios.get(apiUrl, {
-                    params: {
-                        country: 'mx',
-                        pageSize: 20,
-                        page: 1,
-                        apiKey: API_KEY,
-                        language: 'es'
-                    },
-                    headers: requestConfig.headers
-                });
-
-                if (mexicoResponse.data.articles && mexicoResponse.data.articles.length > 0) {
-                    response.data = mexicoResponse.data;
-                    console.log(`Fallback con México exitoso: ${response.data.articles.length} artículos encontrados`);
+        let adaptedArticles = [];
+        if (response.data && response.data.news) {
+            // Adaptar directamente desde el formato search-news
+            adaptedArticles = response.data.news.map(article => ({
+                id: article.id.toString(),
+                title: article.title,
+                description: article.summary || article.text?.substring(0, 150),
+                url: article.url,
+                urlToImage: article.image,
+                publishedAt: article.publish_date,
+                content: article.text,
+                author: article.author || (article.authors && article.authors.length > 0 ? article.authors[0] : ''),
+                source: {
+                    id: null,
+                    name: extractDomainFromUrl(article.url)
                 }
-            }
-            // Solo si no encontramos nada en español, intentamos con US en inglés
-            else if (countryCode !== 'us' && page === 1) {
-                console.log('Probando con país US como último recurso');
-                const fallbackResponse = await axios.get(apiUrl, {
-                    params: {
-                        country: 'us',
-                        pageSize: 20,
-                        page: 1,
-                        apiKey: API_KEY
-                    },
-                    headers: requestConfig.headers
-                });
-
-                if (fallbackResponse.data.articles && fallbackResponse.data.articles.length > 0) {
-                    response.data = fallbackResponse.data;
-                    console.log(`Fallback con US exitoso: ${response.data.articles.length} artículos encontrados`);
-                }
-            }
-
-            // Si todavía no hay resultados, usamos noticias estáticas en español
-            if (response.data.articles.length === 0) {
-                console.log('Usando noticias estáticas de fallback en español');
-                response.data.articles = getFallbackHeadlines();
-                response.data.totalResults = response.data.articles.length;
-            }
+            }));
         }
 
-        // PASO 5: Procesamos los artículos
-        const articlesWithIds = response.data.articles.map(article => ({
+        const articlesWithIds = adaptedArticles.map(article => ({
             ...article,
             id: article.id || generateArticleId(article),
         }));
 
-        // PASO 6: Actualizamos datos sociales de los artículos
         const articlesWithSocial = await addSocialDataToArticles(articlesWithIds);
 
-        // PASO 7: Guardamos en caché, combinando con datos previos si existen
-        let dataToCache = {
-            ...response.data,
+        const dataToCache = {
             articles: articlesWithIds,
             timestamp: Date.now(),
+            totalResults: articlesWithIds.length
         };
 
-        // Si hay caché previa, mezclamos pero damos prioridad a los nuevos
-        if (cachedData && cachedData.articles && Array.isArray(cachedData.articles)) {
-            console.log('Fusionando con caché anterior');
+        await cacheRef.set(dataToCache);
 
-            // Crear un mapa de artículos para eliminar duplicados por ID
-            const articlesMap = new Map();
-
-            // Primero añadimos los artículos nuevos (tendrán prioridad)
-            articlesWithIds.forEach(article => {
-                if (article.id) {
-                    articlesMap.set(article.id, article);
-                }
-            });
-
-            // Luego añadimos los artículos antiguos que no estén duplicados
-            cachedData.articles.forEach(article => {
-                if (article.id && !articlesMap.has(article.id)) {
-                    articlesMap.set(article.id, article);
-                }
-            });
-
-            // Convertimos el mapa de vuelta a un array
-            dataToCache.articles = Array.from(articlesMap.values());
-        }
-
-        // Guardamos en la base de datos
-        try {
-            await cacheRef.set(dataToCache);
-            console.log(`Caché actualizada con ${dataToCache.articles.length} artículos`);
-        } catch (cacheError) {
-            console.error('Error al guardar caché:', cacheError);
-        }
-
-        return {
-            ...response.data,
-            articles: articlesWithSocial
-        };
-    } catch (error) {
-        console.error('Error al obtener noticias destacadas:', error);
-        console.error('Mensaje de error:', error.message);
-
-        // Si hay un error, intentamos recuperar la caché como último recurso
-        try {
-            const cacheKey = `headlines_${country.toLowerCase()}_${category}_${page}`;
-            const cacheRef = database.ref(`news_cache/${cacheKey}`);
-            const snapshot = await cacheRef.once('value');
-            const cachedData = snapshot.val();
-
-            if (cachedData && cachedData.articles && Array.isArray(cachedData.articles)) {
-                console.log('Usando caché como recuperación de error');
-                return {
-                    status: 'ok',
-                    totalResults: cachedData.articles.length,
-                    articles: cachedData.articles,
-                    fromCache: true,
-                    error: error.message
-                };
-            }
-        } catch (cacheError) {
-            console.error('No se pudo recuperar la caché:', cacheError);
-        }
-
-        // Si todo falla, devolvemos noticias estáticas de fallback
-        console.log('Usando noticias estáticas como último recurso');
-        const fallbackArticles = getFallbackHeadlines();
         return {
             status: 'ok',
-            totalResults: fallbackArticles.length,
-            articles: fallbackArticles,
-            isFallback: true
+            articles: articlesWithSocial,
+            totalResults: articlesWithSocial.length
         };
+    } catch (error) {
+        console.error('Error al buscar noticias:', error);
+
+        // Mostrar información más detallada
+        if (error.response) {
+            console.error('Respuesta de error en búsqueda:', error.response.status, error.response.data);
+        }
+
+        throw error;
     }
 };
 
 /**
- * Genera noticias de fallback para cuando la API falle
+ * Genera noticias de fallback
  */
 const getFallbackHeadlines = () => {
-    // Generamos una fecha reciente para las noticias (hoy o ayer)
     const today = new Date();
     const yesterday = new Date(today);
     yesterday.setDate(yesterday.getDate() - 1);
@@ -280,7 +485,6 @@ const getFallbackHeadlines = () => {
     const todayStr = today.toISOString();
     const yesterdayStr = yesterday.toISOString();
 
-    // Lista de noticias predefinidas para casos de fallo
     return [
         {
             id: 'fallback-1',
@@ -324,7 +528,7 @@ const getFallbackHeadlines = () => {
             url: 'https://example.com/privacy-law',
             urlToImage: 'https://picsum.photos/800/400?random=4',
             publishedAt: yesterdayStr,
-            content: 'La nueva legislación obligará a las empresas a implementar medidas de seguridad más rigurosas y transparentes en el tratamiento de datos personales...'
+            content: 'La nueva legislación obligará a las empresas a implementar medidas de seguridad más rigurosas y transparentas en el tratamiento de datos personales...'
         },
         {
             id: 'fallback-5',
@@ -341,16 +545,14 @@ const getFallbackHeadlines = () => {
 };
 
 /**
- * Genera un ID único para un artículo basado en su URL o título
+ * Genera un ID único para un artículo
  */
 const generateArticleId = (article) => {
-    // Si no tiene URL, usamos el título como alternativa
     const baseString = article.url || article.title || Math.random().toString();
-    // Crear un hash simple para usar como ID
     let hash = 0;
     for (let i = 0; i < baseString.length; i++) {
         hash = ((hash << 5) - hash) + baseString.charCodeAt(i);
-        hash |= 0; // Convertir a entero de 32 bits
+        hash |= 0;
     }
     return Math.abs(hash).toString(16);
 };
@@ -360,22 +562,17 @@ const generateArticleId = (article) => {
  */
 const addSocialDataToArticles = async (articles) => {
     try {
-        // Verificar que los artículos sean válidos
         if (!Array.isArray(articles)) {
             console.error('addSocialDataToArticles recibió un valor no válido:', articles);
             return [];
         }
 
-        // Filtrar artículos inválidos
         const validArticles = articles.filter(article => article && typeof article === 'object');
 
-        // Obtener el usuario actual para verificar interacciones
         const currentUser = firebase.auth().currentUser;
         const uid = currentUser ? currentUser.uid : null;
 
-        // Usar Promise.all para manejar todas las consultas en paralelo
         return await Promise.all(validArticles.map(async (article) => {
-            // Validar que el artículo tenga propiedades básicas
             if (!article.title) {
                 article.title = 'Noticia sin título';
             }
@@ -388,17 +585,14 @@ const addSocialDataToArticles = async (articles) => {
 
             const articleId = article.id || generateArticleId(article);
 
-            // Si ya tiene ID, reutilizarlo
             if (!article.id) {
                 article.id = articleId;
             }
 
-            // Obtener recuento de likes
             const likesRef = database.ref(`article_likes/${articleId}/count`);
             const likesSnapshot = await likesRef.once('value');
             const likesCount = likesSnapshot.val() || 0;
 
-            // Verificar si el usuario actual ha dado like
             let userLiked = false;
             if (uid) {
                 const userLikeRef = database.ref(`article_likes/${articleId}/users/${uid}`);
@@ -406,13 +600,11 @@ const addSocialDataToArticles = async (articles) => {
                 userLiked = userLikeSnapshot.exists();
             }
 
-            // Obtener recuento de comentarios
             const commentsRef = database.ref(`article_comments/${articleId}`);
             const commentsSnapshot = await commentsRef.once('value');
             const commentsData = commentsSnapshot.val();
             const commentsCount = commentsData ? Object.keys(commentsData).length : 0;
 
-            // Verificar si el artículo está guardado por el usuario
             let isSaved = false;
             if (uid) {
                 const savedRef = firestore.collection('saved_articles').doc(uid).collection('articles').doc(articleId);
@@ -420,7 +612,6 @@ const addSocialDataToArticles = async (articles) => {
                 isSaved = savedDoc.exists;
             }
 
-            // Devolver artículo con datos sociales
             return {
                 ...article,
                 social: {
@@ -433,73 +624,7 @@ const addSocialDataToArticles = async (articles) => {
         }));
     } catch (error) {
         console.error('Error al añadir datos sociales a los artículos:', error);
-        return articles; // En caso de error, devolver los artículos sin datos sociales
-    }
-};
-
-/**
- * Busca noticias por término de búsqueda con soporte para caché
- */
-export const searchNews = async (query, page = 1) => {
-    try {
-        const cacheKey = `search_${query.toLowerCase().replace(/\s+/g, '_')}_${page}`;
-        const cacheRef = database.ref(`news_cache/${cacheKey}`);
-
-        // Comprobar caché
-        const snapshot = await cacheRef.once('value');
-        const cachedData = snapshot.val();
-
-        const now = moment();
-        const isCacheValid = cachedData &&
-            cachedData.timestamp &&
-            moment(cachedData.timestamp).add(15, 'minutes').isAfter(now);
-
-        if (isCacheValid) {
-            console.log('Usando búsqueda en caché para:', query);
-
-            // Actualizar datos sociales
-            if (cachedData.articles && cachedData.articles.length > 0) {
-                const articlesWithSocial = await addSocialDataToArticles(cachedData.articles);
-                return { ...cachedData, articles: articlesWithSocial };
-            }
-
-            return cachedData;
-        }
-
-        // Si no hay caché o expiró, hacer solicitud a la API
-        const response = await axios.get(`${BASE_URL}/everything`, {
-            params: {
-                q: query,
-                page,
-                pageSize: 20,
-                language: 'es', // Asegurar que la búsqueda sea en español
-                sortBy: 'publishedAt',
-                apiKey: API_KEY,
-            },
-        });
-
-        // Agregar ID a cada artículo
-        const articlesWithIds = response.data.articles.map(article => ({
-            ...article,
-            id: generateArticleId(article),
-        }));
-
-        // Actualizar datos sociales
-        const articlesWithSocial = await addSocialDataToArticles(articlesWithIds);
-
-        // Guardar en caché
-        const dataToCache = {
-            ...response.data,
-            articles: articlesWithIds,
-            timestamp: Date.now(),
-        };
-
-        await cacheRef.set(dataToCache);
-
-        return { ...dataToCache, articles: articlesWithSocial };
-    } catch (error) {
-        console.error('Error al buscar noticias:', error);
-        throw error;
+        return articles;
     }
 };
 
@@ -517,16 +642,13 @@ export const toggleLikeArticle = async (articleId) => {
         const userLikeRef = database.ref(`article_likes/${articleId}/users/${uid}`);
         const countRef = database.ref(`article_likes/${articleId}/count`);
 
-        // Verificar si el usuario ya dio like
         const snapshot = await userLikeRef.once('value');
         const hasLiked = snapshot.exists();
 
-        // Transacción atómica para actualizar el contador
         await countRef.transaction((currentCount) => {
             return hasLiked ? (currentCount || 1) - 1 : (currentCount || 0) + 1;
         });
 
-        // Actualizar el registro del usuario
         if (hasLiked) {
             await userLikeRef.remove();
             return { liked: false };
@@ -554,15 +676,12 @@ export const toggleSaveArticle = async (article) => {
         const articleId = article.id || generateArticleId(article);
         const savedRef = firestore.collection('saved_articles').doc(uid).collection('articles').doc(articleId);
 
-        // Verificar si ya está guardado
         const doc = await savedRef.get();
 
         if (doc.exists) {
-            // Eliminar de guardados
             await savedRef.delete();
             return { saved: false };
         } else {
-            // Guardar el artículo
             await savedRef.set({
                 ...article,
                 savedAt: firebase.firestore.FieldValue.serverTimestamp(),
@@ -610,7 +729,7 @@ export const getUserRegion = async () => {
     try {
         const currentUser = firebase.auth().currentUser;
         if (!currentUser) {
-            return 'es'; // Valor predeterminado
+            return 'es';
         }
 
         const uid = currentUser.uid;
@@ -621,10 +740,10 @@ export const getUserRegion = async () => {
             return userData.region || 'es';
         }
 
-        return 'es'; // Valor predeterminado
+        return 'es';
     } catch (error) {
         console.error('Error al obtener la región del usuario:', error);
-        return 'es'; // Valor predeterminado en caso de error
+        return 'es';
     }
 };
 
@@ -652,11 +771,11 @@ export const updateUserRegion = async (region) => {
     }
 };
 
-// Mantenemos las funciones originales pero actualizadas
+// Exportaciones adicionales
 export const getNewsBySource = async (sources, page = 1) => {
-    // Código original con soporte para caché...
+    // Implementación para WorldNewsAPI
 };
 
 export const getSources = async (category = '', language = 'es') => {
-    // Código original...
+    // Implementación para WorldNewsAPI
 };
