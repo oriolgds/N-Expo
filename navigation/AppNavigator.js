@@ -1,25 +1,25 @@
 import React, { useEffect, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { ActivityIndicator, View, Text } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { ActivityIndicator, View } from 'react-native';
 
 // Auth screens
 import LoginScreen from '../screens/auth/LoginScreen';
 import RegisterScreen from '../screens/auth/RegisterScreen';
 
-// Home screens (Serán creados más adelante)
+// Home screens
 import HomeScreen from '../screens/home/HomeScreen';
-import SearchScreen from '../screens/home/SearchScreen';
 import ProfileScreen from '../screens/home/ProfileScreen';
 
-// Firebase auth - Añadimos restoreSession a las importaciones
+// News screen
+import NewsDetailScreen from '../screens/news/NewsDetailScreen';
+
+// Firebase auth
 import { auth, subscribeToAuthChanges, restoreSession } from '../services/firebase';
 import { COLORS } from '../styles/theme';
 
 const Stack = createStackNavigator();
-const Tab = createBottomTabNavigator();
+const AppStack = createStackNavigator();
 
 const AuthStack = () => {
   return (
@@ -35,48 +35,25 @@ const AuthStack = () => {
   );
 };
 
-const HomeStack = () => {
+const MainStack = () => {
   return (
-    <Tab.Navigator
-      screenOptions={({ route }) => ({
-        headerShown: true,
-        tabBarIcon: ({ focused, color, size }) => {
-          let iconName;
-
-          if (route.name === 'Home') {
-            iconName = focused ? 'home' : 'home-outline';
-          } else if (route.name === 'Search') {
-            iconName = focused ? 'search' : 'search-outline';
-          } else if (route.name === 'Profile') {
-            iconName = focused ? 'person' : 'person-outline';
-          }
-
-          return <Ionicons name={iconName} size={size} color={color} />;
-        },
-        tabBarActiveTintColor: COLORS.accent,
-        tabBarInactiveTintColor: COLORS.textSecondary,
-        tabBarStyle: {
-          borderTopColor: COLORS.border,
-          backgroundColor: COLORS.background,
-        },
-      })}
-    >
-      <Tab.Screen
+    <Stack.Navigator>
+      <Stack.Screen
         name="Home"
         component={HomeScreen}
-        options={{ title: 'Noticias' }}
+        options={{ headerShown: false }}
       />
-      <Tab.Screen
-        name="Search"
-        component={SearchScreen}
-        options={{ title: 'Buscar' }}
-      />
-      <Tab.Screen
+      <Stack.Screen
         name="Profile"
         component={ProfileScreen}
         options={{ title: 'Perfil' }}
       />
-    </Tab.Navigator>
+      <Stack.Screen
+        name="NewsDetail"
+        component={NewsDetailScreen}
+        options={{ headerShown: false }}
+      />
+    </Stack.Navigator>
   );
 };
 
@@ -128,12 +105,21 @@ const AppNavigator = () => {
   }, []);
 
   // Skip rendering anything if initialization is still happening
-  // La pantalla de carga principal estará en App.js
   if (!appReady) return null;
 
   return (
     <NavigationContainer>
-      {user ? <HomeStack /> : <AuthStack />}
+      {user ? (
+        <AppStack.Navigator>
+          <AppStack.Screen
+            name="MainStack"
+            component={MainStack}
+            options={{ headerShown: false }}
+          />
+        </AppStack.Navigator>
+      ) : (
+        <AuthStack />
+      )}
     </NavigationContainer>
   );
 };

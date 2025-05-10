@@ -6,6 +6,7 @@ import moment from 'moment';
 import 'moment/locale/es';
 import { COLORS } from '../styles/theme';
 import { toggleLikeArticle, toggleSaveArticle } from '../services/newsService';
+import { useNavigation } from '@react-navigation/native';
 
 moment.locale('es');
 
@@ -21,6 +22,8 @@ const NewsCard = ({ article = {} }) => {
       </Card>
     );
   }
+
+  const navigation = useNavigation();
 
   // Estados para manejar interacciones - con valores predeterminados seguros
   const [liked, setLiked] = useState(article?.social?.userLiked || false);
@@ -181,6 +184,11 @@ const NewsCard = ({ article = {} }) => {
     setCommentsVisible(true);
   };
 
+  // Función para navegar a la pantalla de detalles
+  const handleNavigateToDetail = () => {
+    navigation.navigate('NewsDetail', { article });
+  };
+
   // Agregar nuevo comentario
   const handleAddComment = async () => {
     if (!isAuthenticated) {
@@ -217,26 +225,24 @@ const NewsCard = ({ article = {} }) => {
 
   return (
     <Card style={styles.card} mode="outlined">
-      {article.urlToImage && (
-        <Image
-          source={{ uri: article.urlToImage }}
-          style={styles.image}
-          resizeMode="cover"
-        />
-      )}
-
-      <Card.Content style={styles.content}>
-        <View style={styles.sourceContainer}>
-          <Text style={styles.source}>{article?.source?.name || 'Fuente desconocida'}</Text>
-          <Text style={styles.date}>{formattedDate}</Text>
-        </View>
-
-        <Text style={styles.title}>{article.title || 'Sin título'}</Text>
-
-        {expanded && article.description && (
-          <Text style={styles.description}>{article.description}</Text>
+      <TouchableOpacity onPress={handleNavigateToDetail} activeOpacity={0.7}>
+        {article.urlToImage && (
+          <Image
+            source={{ uri: article.urlToImage }}
+            style={styles.image}
+            resizeMode="cover"
+          />
         )}
-      </Card.Content>
+
+        <Card.Content style={styles.content}>
+          <View style={styles.sourceContainer}>
+            <Text style={styles.source}>{article?.source?.name || 'Fuente desconocida'}</Text>
+            <Text style={styles.date}>{formattedDate}</Text>
+          </View>
+
+          <Text style={styles.title}>{article.title || 'Sin título'}</Text>
+        </Card.Content>
+      </TouchableOpacity>
 
       <View style={styles.actionsContainer}>
         <IconButton
@@ -254,7 +260,7 @@ const NewsCard = ({ article = {} }) => {
           icon="comment-outline"
           iconColor={COLORS.textSecondary}
           size={22}
-          onPress={handleShowComments}
+          onPress={handleNavigateToDetail}
           disabled={loading}
         />
         {commentsCount > 0 && (
@@ -268,31 +274,22 @@ const NewsCard = ({ article = {} }) => {
           onPress={handleToggleSave}
           disabled={loading}
         />
-
-        <View style={styles.expandButtonContainer}>
-          <Button
-            onPress={() => setExpanded(!expanded)}
-            mode="text"
-            textColor={COLORS.accent}
-            compact
-          >
-            {expanded ? "Ver menos" : "Ver más"}
-          </Button>
-        </View>
       </View>
 
       <Divider />
 
-      <Card.Actions>
-        <Button
-          mode="text"
-          onPress={() => {
-            // Aquí se implementaría la lógica para abrir el artículo completo
-          }}
-        >
-          Leer artículo completo
-        </Button>
-      </Card.Actions>
+      {expanded && (
+        <Card.Actions>
+          <Button
+            mode="text"
+            onPress={() => {
+              // Aquí se implementaría la lógica para abrir el artículo completo
+            }}
+          >
+            Leer artículo completo
+          </Button>
+        </Card.Actions>
+      )}
 
       {/* Modal de comentarios */}
       <Modal

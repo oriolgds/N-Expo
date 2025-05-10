@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { View, FlatList, StyleSheet, RefreshControl } from 'react-native';
-import { ActivityIndicator, Text } from 'react-native-paper';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { View, FlatList, StyleSheet, RefreshControl, Animated, Image, TouchableOpacity, Platform, StatusBar } from 'react-native';
+import { ActivityIndicator, Text, IconButton } from 'react-native-paper';
+import { useNavigation } from '@react-navigation/native';
 import {
   getTopHeadlines,
   getUserRegion,
@@ -11,6 +12,12 @@ import {
 import NewsCard from '../../components/NewsCard';
 import { COLORS } from '../../styles/theme';
 
+// Ajustar estas constantes para incluir el margen superior
+const HEADER_MAX_HEIGHT = 60;
+const HEADER_MIN_HEIGHT = 0;
+const HEADER_SCROLL_DISTANCE = HEADER_MAX_HEIGHT - HEADER_MIN_HEIGHT;
+const HEADER_MARGIN_TOP = Platform.OS === 'ios' ? 40 : 30; // Margen superior para evitar solaparse con la barra del sistema
+
 const HomeScreen = () => {
   const [news, setNews] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -19,6 +26,42 @@ const HomeScreen = () => {
   const [page, setPage] = useState(1);
   const [hasMoreData, setHasMoreData] = useState(true);
   const [userRegion, setUserRegion] = useState('es');
+  const navigation = useNavigation();
+
+  // Ref para la animación del scroll
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const scrollYClamped = Animated.diffClamp(scrollY, 0, HEADER_MARGIN_TOP + HEADER_MAX_HEIGHT);
+
+  const translateY = scrollYClamped.interpolate({
+    inputRange: [0, HEADER_MARGIN_TOP + HEADER_MAX_HEIGHT],
+    outputRange: [0, -HEADER_MARGIN_TOP - HEADER_MAX_HEIGHT],
+    extrapolate: 'clamp',
+  });
+
+  // Variable para rastrear la dirección del scroll
+  const scrollDirection = useRef(new Animated.Value(0)).current;
+  const clampedScrollY = useRef(new Animated.Value(0)).current;
+
+  const handleScroll = Animated.event(
+    [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+    {
+      useNativeDriver: true,
+      listener: event => {
+        const offsetY = event.nativeEvent.contentOffset.y;
+        // Actualizar el valor clampedScrollY con el valor actual del scroll
+        clampedScrollY.setValue(Math.min(Math.max(0, offsetY), HEADER_MARGIN_TOP + HEADER_MAX_HEIGHT));
+
+        // Determinar la dirección del scroll
+        if (offsetY > clampedScrollY._value) {
+          // Scrolling hacia abajo
+          scrollDirection.setValue(1);
+        } else if (offsetY < clampedScrollY._value) {
+          // Scrolling hacia arriba
+          scrollDirection.setValue(-1);
+        }
+      }
+    }
+  );
 
   // Obtener la región preferida del usuario
   useEffect(() => {
@@ -144,14 +187,48 @@ const HomeScreen = () => {
     return <NewsCard article={item} />;
   };
 
+  // Navegar a la pantalla de perfil
+  const goToProfile = () => {
+    navigation.navigate('Profile');
+  };
+
   return (
     <View style={styles.container}>
+      {/* Header animado que se muestra/oculta según dirección del scroll */}
+      <Animated.View
+        style={[
+          styles.header,
+          {
+            transform: [{ translateY }],
+            marginTop: HEADER_MARGIN_TOP,
+          },
+        ]}
+      >
+        <View style={styles.headerContent}>
+          <Image
+            source={require('../../assets/logo.png')}
+            style={styles.logo}
+            resizeMode="contain"
+          />
+          <TouchableOpacity onPress={goToProfile}>
+            <IconButton
+              icon="account-circle"
+              size={30}
+              color={COLORS.accent}
+            />
+          </TouchableOpacity>
+        </View>
+      </Animated.View>
+
+      <StatusBar backgroundColor={COLORS.background} barStyle="dark-content" />
+
       {error ? (
-        <View style={styles.errorContainer}>
+        <View style={[styles.errorContainer, { marginTop: HEADER_MARGIN_TOP + HEADER_MAX_HEIGHT }]}>
           <Text style={styles.errorText}>{error}</Text>
         </View>
       ) : (
-        <FlatList
+        <Animated.FlatList
+          contentContainerStyle={{ paddingTop: HEADER_MARGIN_TOP + HEADER_MAX_HEIGHT }}
           data={news}
           keyExtractor={(item) => item?.id || `${item?.title || Math.random()}-${Math.random()}`}
           renderItem={renderItem}
@@ -161,6 +238,7 @@ const HomeScreen = () => {
               onRefresh={handleRefresh}
               colors={[COLORS.accent]}
               tintColor={COLORS.accent}
+              progressViewOffset={HEADER_MARGIN_TOP + HEADER_MAX_HEIGHT}
             />
           }
           onEndReached={handleLoadMore}
@@ -177,6 +255,9 @@ const HomeScreen = () => {
               </View>
             )
           }
+          // Conectar el scroll a la animación
+          onScroll={handleScroll}
+          scrollEventThrottle={16}
         />
       )}
     </View>
@@ -187,6 +268,32 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
+  },
+  header: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: HEADER_MAX_HEIGHT,
+    backgroundColor: COLORS.background,
+    zIndex: 1000,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    paddingTop: HEADER_MARGIN_TOP,
+  },
+  headerContent: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+  },
+  logo: {
+    height: 40,
+    width: 40,
   },
   loaderContainer: {
     flex: 1,
