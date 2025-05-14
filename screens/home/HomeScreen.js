@@ -32,6 +32,8 @@ const HomeScreen = () => {
   const [userRegion, setUserRegion] = useState('es');
   const [selectedCategory, setSelectedCategory] = useState('');
   const navigation = useNavigation();
+  const [cachedCategories, setCachedCategories] = useState(new Set());
+  const [backgroundLoading, setBackgroundLoading] = useState(false);
 
   // Ref para la animación del scroll (solo se usa en móvil)
   const scrollY = useRef(new Animated.Value(0)).current;
@@ -91,8 +93,13 @@ const HomeScreen = () => {
       if (currentCacheKey === cacheKey) {
         console.log('✅ Actualizando UI con nuevos datos de categoría');
         setNews(newArticles);
-        // No mostrar spinner de refreshing para actualizaciones en segundo plano
       }
+
+      // Extraer la categoría del cacheKey (formato: region_categoria)
+      const category = cacheKey.split('_')[1] === 'general' ? '' : cacheKey.split('_')[1];
+
+      // Actualizar lista de categorías cacheadas
+      setCachedCategories(prev => new Set(prev).add(category));
     };
 
     // Callback para cuando los datos sociales se completan
@@ -111,13 +118,60 @@ const HomeScreen = () => {
     };
   }, [userRegion, selectedCategory]);
 
+  // Nueva función para precargar todas las categorías en segundo plano
+  const precacheAllCategories = useCallback(async () => {
+    if (backgroundLoading) return;
+
+    try {
+      setBackgroundLoading(true);
+      console.log('🔄 Iniciando precarga de todas las categorías en segundo plano');
+
+      // Primero asegurarse de que la categoría actual (top news) ya está marcada como cacheada
+      setCachedCategories(prev => new Set(prev).add(''));
+
+      // Crear un array con todas las categorías (excepto la actual que ya está cargada)
+      const categoriesToLoad = Object.keys(NEWS_CATEGORIES).filter(category =>
+        category !== selectedCategory
+      );
+
+      // Cargar categorías secuencialmente para no saturar la red ni la memoria
+      for (const category of categoriesToLoad) {
+        if (!navigator.onLine) {
+          console.log('Sin conexión, deteniendo precarga');
+          break;
+        }
+
+        console.log(`🔄 Precargando categoría: ${category}`);
+        try {
+          const response = await getTopHeadlinesOptimized(userRegion, category);
+          if (response && Array.isArray(response.articles)) {
+            console.log(`✅ Categoría ${category} precargada (${response.articles.length} artículos)`);
+            setCachedCategories(prev => new Set(prev).add(category));
+          }
+        } catch (e) {
+          console.log(`❌ Error al precargar categoría ${category}:`, e);
+          // Continuamos con la siguiente categoría aunque haya error
+        }
+
+        // Pequeña pausa entre solicitudes para no saturar
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+
+      console.log('✅ Precarga de categorías completada');
+    } catch (error) {
+      console.error('Error en precarga de categorías:', error);
+    } finally {
+      setBackgroundLoading(false);
+    }
+  }, [userRegion, selectedCategory, backgroundLoading]);
+
   // Función para cargar noticias iniciales - optimizada
   const initialLoad = useCallback(async () => {
     try {
       console.log(`Iniciando carga para categoría: ${selectedCategory === '' ? 'top-news' : selectedCategory}`);
 
-      // Mostrar loader solo si no tenemos datos previos
-      if (news.length === 0) {
+      // Mostrar loader solo si no tenemos datos previos y la categoría no está en caché
+      if (news.length === 0 && !cachedCategories.has(selectedCategory)) {
         setLoading(true);
       }
 
@@ -137,10 +191,16 @@ const HomeScreen = () => {
           setHasMoreData(count >= 20);
           setError(null);
 
-          // No mostrar indicador de actualización para caché en memoria
-          // ya que esto sería demasiado intrusivo para una operación tan rápida
-          if (response.updating && !response.fromMemoryCache) {
-            console.log('Actualización en segundo plano en curso');
+          // Marcar esta categoría como cargada en caché
+          setCachedCategories(prev => new Set(prev).add(selectedCategory));
+
+          // Si es la primera carga (Top News) e iniciar precarga de otras categorías
+          if (selectedCategory === '' && !backgroundLoading && cachedCategories.size <= 1) {
+            console.log('⏳ Programando precarga de categorías después de cargar Top News');
+            // Retraso para dar tiempo a que se renderice la UI primero
+            setTimeout(() => {
+              precacheAllCategories();
+            }, 2000);
           }
         }
       } else {
@@ -155,7 +215,7 @@ const HomeScreen = () => {
     } finally {
       setLoading(false);
     }
-  }, [userRegion, selectedCategory, news.length]);
+  }, [userRegion, selectedCategory, news.length, cachedCategories, backgroundLoading, precacheAllCategories]);
 
   // Pre-cargar categorías adyacentes cuando el usuario está en una categoría
   useEffect(() => {
@@ -256,7 +316,7 @@ const HomeScreen = () => {
     }
   };
 
-  // Modificar la función handleCategorySelect para evitar doble carga
+  // Modificar la función handleCategorySelect para aprovechar la caché
   const handleCategorySelect = (category) => {
     // Si ya estamos en esta categoría, no hacer nada o volver a top-news
     if (category === selectedCategory) {
@@ -269,89 +329,74 @@ const HomeScreen = () => {
 
     console.log(`Cambiando categoría: ${selectedCategory === '' ? 'top-news' : selectedCategory} -> ${category || 'top-news'}`);
 
-    // Solo mostrar loader si no hay datos en caché de memoria (cambio rápido)
-    setNews([]); // Limpiar noticias actuales para evitar mostrar contenido incorrecto
-    setLoading(true);
+    // Verificar si la categoría ya está en caché
+    const isCached = cachedCategories.has(category);
+    console.log(`Categoría ${category || 'top-news'} ${isCached ? 'encontrada en caché' : 'no está en caché'}`);
+
+    // Limpiar noticias actuales para evitar mostrar contenido incorrecto
+    setNews([]);
+
+    // Solo mostrar loader si la categoría no está en caché
+    setLoading(!isCached);
     setPage(1);
     setSelectedCategory(category);
 
-    // Vamos a hacer una carga inmediata para mostrar resultados sin esperar al useEffect
+    // Hacer una carga inmediata
     getTopHeadlinesOptimized(userRegion, category).then(response => {
       if (response && Array.isArray(response.articles)) {
         setNews(response.articles);
         setHasMoreData(response.articles.length >= 20);
         setError(null);
+
+        // Marcar la categoría como cargada en caché
+        setCachedCategories(prev => new Set(prev).add(category));
       }
       setLoading(false);
     }).catch(error => {
-      console.error('Error en cambio rápido de categoría:', error);
+      console.error('Error en cambio de categoría:', error);
       setLoading(false);
     });
   };
 
-  // Optimizar el renderizado de la lista para evitar reconstrucciones innecesarias
-  const renderItem = useCallback(({ item }) => {
-    if (!item || typeof item !== 'object' || (!item.title && !item.isLoading)) {
-      return null;
-    }
-
-    // Si es un artículo de carga, mostrar un skeleton
-    if (item.isLoading) {
-      return (
-        <View style={styles.loadingCardContainer}>
-          <View style={styles.loadingCardHeader} />
-          <View style={styles.loadingCardTitle} />
-          <View style={styles.loadingCardContent} />
-        </View>
-      );
-    }
-
-    // Evita rerenderizaciones innecesarias pasando el artículo completo
-    return <NewsCard article={item} />;
-  }, []);
-
-  // Optimizar la función listEmptyComponent para no reconstruirse en cada render
-  const ListEmptyComponent = useCallback(() => {
-    if (loading) {
-      return (
-        <View style={styles.loaderContainer}>
-          <ActivityIndicator size="large" color={COLORS.accent} />
-        </View>
-      );
-    }
-
+  // Renderizar chips de categorías para dispositivos móviles (con scroll horizontal)
+  const renderCategoryChips = () => {
     return (
-      <View style={styles.emptyContainer}>
-        <Text>No hay noticias disponibles para esta categoría</Text>
-      </View>
-    );
-  }, [loading]);
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.categoriesContentContainer}
+        style={styles.categoriesContainer}
+      >
+        {/* Top News */}
+        <Chip
+          selected={selectedCategory === ''}
+          onPress={() => handleCategorySelect('')}
+          style={styles.categoryChip}
+          textStyle={selectedCategory === '' ? styles.selectedCategoryText : styles.categoryText}
+        >
+          Top News
+        </Chip>
 
-  const renderFooter = () => {
-    if (!loading && !refreshing) return null;
-
-    return (
-      <View style={styles.footerLoader}>
-        <ActivityIndicator color={COLORS.accent} />
-      </View>
+        {/* Otras categorías */}
+        {Object.entries(NEWS_CATEGORIES).map(([key, label]) => (
+          <Chip
+            key={key}
+            selected={selectedCategory === key}
+            onPress={() => handleCategorySelect(key)}
+            style={styles.categoryChip}
+            textStyle={selectedCategory === key ? styles.selectedCategoryText : styles.categoryText}
+          >
+            {label}
+          </Chip>
+        ))}
+      </ScrollView>
     );
   };
 
-  // Navegar a la pantalla de perfil
-  const goToProfile = () => {
-    navigation.navigate('Profile');
-  };
-
-  // Renderizar chips de categorías específicamente para web (en grid)
+  // Renderizar chips de categorías para web (en línea con el header)
   const renderWebCategoryChips = () => {
     return (
-      <div style={{
-        display: 'flex',
-        flexWrap: 'wrap',
-        justifyContent: 'center',
-        padding: '8px 16px',
-        gap: '8px',
-      }}>
+      <>
         {/* Top News */}
         <Chip
           selected={selectedCategory === ''}
@@ -363,7 +408,7 @@ const HomeScreen = () => {
           Top News
         </Chip>
 
-        {/* Todas las categorías en una fila con wrapping */}
+        {/* Otras categorías en la misma fila */}
         {Object.entries(NEWS_CATEGORIES).map(([key, label]) => (
           <Chip
             key={key}
@@ -376,12 +421,20 @@ const HomeScreen = () => {
             {label}
           </Chip>
         ))}
-      </div>
+      </>
     );
   };
 
   // Renderizado específico para plataforma web
   const renderWebView = () => {
+    // Definir goToProfile aquí para asegurar que está disponible en el contexto
+    const goToProfile = () => {
+      navigation.navigate('Profile');
+    };
+
+    // Determinar si debemos usar layout responsive basado en ancho de pantalla
+    const useResponsiveLayout = typeof window !== 'undefined' && window.innerWidth < 1100;
+
     return (
       <div style={{
         display: 'flex',
@@ -390,7 +443,7 @@ const HomeScreen = () => {
         width: '100%',
         overflow: 'hidden',
       }}>
-        {/* Header fijo para web - más compacto */}
+        {/* Header fijo para web - con categorías en la misma fila o en fila separada según el ancho */}
         <div style={{
           position: 'fixed',
           top: 0,
@@ -399,21 +452,30 @@ const HomeScreen = () => {
           backgroundColor: COLORS.background,
           zIndex: 1000,
           boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+          padding: '8px 16px',
+          height: useResponsiveLayout ? '110px' : '60px', // Altura ajustada para layout responsive
+          display: 'flex',
+          flexDirection: useResponsiveLayout ? 'column' : 'row', // Cambiar a columna en pantallas pequeñas
+          alignItems: 'center',
+          justifyContent: useResponsiveLayout ? 'flex-start' : 'space-between',
         }}>
-          {/* Fila superior: Logo y perfil en línea */}
+          {/* Primera fila con logo y perfil */}
           <div style={{
             display: 'flex',
             flexDirection: 'row',
-            justifyContent: 'space-between',
             alignItems: 'center',
-            padding: '8px 16px',
-            height: '50px',
+            justifyContent: 'space-between',
+            width: '100%',
+            height: '60px',
           }}>
+            {/* Logo a la izquierda */}
             <Image
               source={require('../../assets/logo.png')}
               style={styles.logo}
               resizeMode="contain"
             />
+
+            {/* Botón de perfil a la derecha */}
             <TouchableOpacity onPress={goToProfile}>
               <IconButton
                 icon="account-circle"
@@ -423,19 +485,52 @@ const HomeScreen = () => {
             </TouchableOpacity>
           </div>
 
-          {/* Fila inferior: Categorías en grid con wrap */}
-          {renderWebCategoryChips()}
+          {/* Fila o columna para categorías según layout */}
+          {useResponsiveLayout ? (
+            <div style={{
+              display: 'flex',
+              flexDirection: 'row',
+              justifyContent: 'center',
+              alignItems: 'center',
+              gap: '8px',
+              width: '100%',
+              overflowX: 'auto',
+              paddingBottom: '8px',
+              paddingTop: '4px',
+              whiteSpace: 'nowrap',
+              scrollbarWidth: 'none',
+              msOverflowStyle: 'none',
+            }}>
+              {renderWebCategoryChips()}
+            </div>
+          ) : (
+            <div style={{
+              display: 'flex',
+              flexDirection: 'row',
+              justifyContent: 'center',
+              gap: '8px',
+              flex: 1,
+              marginLeft: '16px',
+              marginRight: '16px',
+              overflow: 'auto',
+              whiteSpace: 'nowrap',
+              scrollbarWidth: 'none',
+              msOverflowStyle: 'none',
+            }}>
+              {renderWebCategoryChips()}
+            </div>
+          )}
         </div>
 
-        {/* Contenido scrolleable con margen superior reducido */}
+        {/* Contenido scrolleable con margen superior ajustado según layout */}
         <div style={{
-          marginTop: 110, // Altura reducida del header
+          marginTop: useResponsiveLayout ? '110px' : '60px', // Ajustar según la altura del header
           overflowY: 'auto',
           flex: 1,
           WebkitOverflowScrolling: 'touch',
           padding: '16px',
-          maxWidth: '1200px', // Limitar ancho máximo en pantallas muy grandes
-          margin: '110px auto 0', // Centrar el contenido
+          maxWidth: '1200px',
+          margin: useResponsiveLayout ? '110px auto 0' : '60px auto 0', // Ajustar según la altura del header
           width: '100%',
         }}>
           {error ? (
