@@ -393,10 +393,19 @@ const HomeScreen = () => {
     );
   };
 
-  // Renderizar chips de categorías para web (en línea con el header)
-  const renderWebCategoryChips = () => {
+  // Renderizar chips de categorías para web (adaptado al espacio disponible)
+  const renderWebCategoryChips = (isWideScreen) => {
     return (
-      <>
+      <div style={{
+        display: 'flex',
+        flexWrap: isWideScreen ? 'nowrap' : 'wrap',
+        justifyContent: 'center',
+        alignItems: 'center',
+        gap: '8px',
+        padding: '4px',
+        overflowX: isWideScreen ? 'auto' : 'visible',
+        flex: isWideScreen ? 1 : 'none',
+      }}>
         {/* Top News */}
         <Chip
           selected={selectedCategory === ''}
@@ -408,7 +417,7 @@ const HomeScreen = () => {
           Top News
         </Chip>
 
-        {/* Otras categorías en la misma fila */}
+        {/* Todas las categorías */}
         {Object.entries(NEWS_CATEGORIES).map(([key, label]) => (
           <Chip
             key={key}
@@ -421,19 +430,14 @@ const HomeScreen = () => {
             {label}
           </Chip>
         ))}
-      </>
+      </div>
     );
   };
 
   // Renderizado específico para plataforma web
   const renderWebView = () => {
-    // Definir goToProfile aquí para asegurar que está disponible en el contexto
-    const goToProfile = () => {
-      navigation.navigate('Profile');
-    };
-
-    // Determinar si debemos usar layout responsive basado en ancho de pantalla
-    const useResponsiveLayout = typeof window !== 'undefined' && window.innerWidth < 1100;
+    // Determinar si estamos en una pantalla ancha (>= 1024px)
+    const isWideScreen = typeof window !== 'undefined' && window.innerWidth >= 1024;
 
     return (
       <div style={{
@@ -443,7 +447,7 @@ const HomeScreen = () => {
         width: '100%',
         overflow: 'hidden',
       }}>
-        {/* Header fijo para web - con categorías en la misma fila o en fila separada según el ancho */}
+        {/* Header fijo para web - adaptativo según el tamaño de pantalla */}
         <div style={{
           position: 'fixed',
           top: 0,
@@ -453,20 +457,19 @@ const HomeScreen = () => {
           zIndex: 1000,
           boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
           padding: '8px 16px',
-          height: useResponsiveLayout ? '110px' : '60px', // Altura ajustada para layout responsive
           display: 'flex',
-          flexDirection: useResponsiveLayout ? 'column' : 'row', // Cambiar a columna en pantallas pequeñas
+          flexDirection: isWideScreen ? 'row' : 'column', // En pantalla ancha, todo en una fila
+          height: isWideScreen ? '70px' : '110px', // Altura adaptativa
           alignItems: 'center',
-          justifyContent: useResponsiveLayout ? 'flex-start' : 'space-between',
         }}>
-          {/* Primera fila con logo y perfil */}
+          {/* Contenedor flexible para logo y perfil */}
           <div style={{
             display: 'flex',
             flexDirection: 'row',
             alignItems: 'center',
             justifyContent: 'space-between',
-            width: '100%',
-            height: '60px',
+            width: isWideScreen ? 'auto' : '100%', // En móvil ocupa todo el ancho
+            marginRight: isWideScreen ? '16px' : '0', // Espacio entre logo y categorías en pantalla ancha
           }}>
             {/* Logo a la izquierda */}
             <Image
@@ -475,64 +478,53 @@ const HomeScreen = () => {
               resizeMode="contain"
             />
 
-            {/* Botón de perfil a la derecha */}
-            <TouchableOpacity onPress={goToProfile}>
+            {/* Botón de perfil (solo mostrado a la derecha en móvil o al extremo derecho en desktop) */}
+            {!isWideScreen && (
+              <TouchableOpacity onPress={() => navigation.navigate('Profile')}>
+                <IconButton
+                  icon="account-circle"
+                  size={30}
+                  color={COLORS.accent}
+                />
+              </TouchableOpacity>
+            )}
+          </div>
+
+          {/* Categorías - en la misma fila en pantalla ancha */}
+          <div style={{
+            display: 'flex',
+            flex: isWideScreen ? 1 : 'none', // Toma el espacio disponible en pantalla ancha
+            overflowX: 'auto',
+            width: isWideScreen ? 'auto' : '100%',
+            justifyContent: isWideScreen ? 'center' : 'flex-start',
+          }}>
+            {renderWebCategoryChips(isWideScreen)}
+          </div>
+
+          {/* Botón de perfil en el extremo derecho (solo en pantalla ancha) */}
+          {isWideScreen && (
+            <TouchableOpacity onPress={() => navigation.navigate('Profile')}>
               <IconButton
                 icon="account-circle"
                 size={30}
                 color={COLORS.accent}
               />
             </TouchableOpacity>
-          </div>
-
-          {/* Fila o columna para categorías según layout */}
-          {useResponsiveLayout ? (
-            <div style={{
-              display: 'flex',
-              flexDirection: 'row',
-              justifyContent: 'center',
-              alignItems: 'center',
-              gap: '8px',
-              width: '100%',
-              overflowX: 'auto',
-              paddingBottom: '8px',
-              paddingTop: '4px',
-              whiteSpace: 'nowrap',
-              scrollbarWidth: 'none',
-              msOverflowStyle: 'none',
-            }}>
-              {renderWebCategoryChips()}
-            </div>
-          ) : (
-            <div style={{
-              display: 'flex',
-              flexDirection: 'row',
-              justifyContent: 'center',
-              gap: '8px',
-              flex: 1,
-              marginLeft: '16px',
-              marginRight: '16px',
-              overflow: 'auto',
-              whiteSpace: 'nowrap',
-              scrollbarWidth: 'none',
-              msOverflowStyle: 'none',
-            }}>
-              {renderWebCategoryChips()}
-            </div>
           )}
         </div>
 
         {/* Contenido scrolleable con margen superior ajustado según layout */}
         <div style={{
-          marginTop: useResponsiveLayout ? '110px' : '60px', // Ajustar según la altura del header
+          marginTop: isWideScreen ? '70px' : '110px',
           overflowY: 'auto',
           flex: 1,
           WebkitOverflowScrolling: 'touch',
           padding: '16px',
           maxWidth: '1200px',
-          margin: useResponsiveLayout ? '110px auto 0' : '60px auto 0', // Ajustar según la altura del header
+          margin: `${isWideScreen ? '70px' : '110px'} auto 0`,
           width: '100%',
         }}>
+          {/* Contenido de noticias */}
           {error ? (
             <View style={styles.errorContainer}>
               <Text style={styles.errorText}>{error}</Text>
@@ -544,7 +536,7 @@ const HomeScreen = () => {
           ) : (
             <div style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+              gridTemplateColumns: `repeat(auto-fill, minmax(${isWideScreen ? '350px' : '300px'}, 1fr))`,
               gap: '16px'
             }}>
               {news.map((item) => (
