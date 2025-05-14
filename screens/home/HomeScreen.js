@@ -33,7 +33,7 @@ const HomeScreen = () => {
   const [selectedCategory, setSelectedCategory] = useState('');
   const navigation = useNavigation();
 
-  // Ref para la animación del scroll
+  // Ref para la animación del scroll (solo se usa en móvil)
   const scrollY = useRef(new Animated.Value(0)).current;
   const scrollYClamped = Animated.diffClamp(scrollY, 0, HEADER_TOTAL_HEIGHT + CATEGORY_BAR_HEIGHT);
 
@@ -43,30 +43,28 @@ const HomeScreen = () => {
     extrapolate: 'clamp',
   });
 
-  // Variable para rastrear la dirección del scroll
   const scrollDirection = useRef(new Animated.Value(0)).current;
   const clampedScrollY = useRef(new Animated.Value(0)).current;
 
-  const handleScroll = Animated.event(
-    [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-    {
-      useNativeDriver: true,
-      listener: event => {
-        const offsetY = event.nativeEvent.contentOffset.y;
-        // Actualizar el valor clampedScrollY con el valor actual del scroll
-        clampedScrollY.setValue(Math.min(Math.max(0, offsetY), HEADER_TOTAL_HEIGHT + CATEGORY_BAR_HEIGHT));
+  // Solo usar el handler de scroll animado en versiones nativas
+  const handleScroll = Platform.OS !== 'web'
+    ? Animated.event(
+      [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+      {
+        useNativeDriver: true,
+        listener: event => {
+          const offsetY = event.nativeEvent.contentOffset.y;
+          clampedScrollY.setValue(Math.min(Math.max(0, offsetY), HEADER_TOTAL_HEIGHT + CATEGORY_BAR_HEIGHT));
 
-        // Determinar la dirección del scroll
-        if (offsetY > clampedScrollY._value) {
-          // Scrolling hacia abajo
-          scrollDirection.setValue(1);
-        } else if (offsetY < clampedScrollY._value) {
-          // Scrolling hacia arriba
-          scrollDirection.setValue(-1);
+          if (offsetY > clampedScrollY._value) {
+            scrollDirection.setValue(1);
+          } else if (offsetY < clampedScrollY._value) {
+            scrollDirection.setValue(-1);
+          }
         }
       }
-    }
-  );
+    )
+    : null;
 
   // Obtener la región preferida del usuario
   useEffect(() => {
@@ -344,118 +342,215 @@ const HomeScreen = () => {
     navigation.navigate('Profile');
   };
 
-  // Renderizar chips de categorías
-  const renderCategoryChips = () => {
+  // Renderizar chips de categorías específicamente para web (en grid)
+  const renderWebCategoryChips = () => {
     return (
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.categoriesContainer}
-        contentContainerStyle={styles.categoriesContentContainer}
-      >
-        {/* Top News (sin categoría) */}
+      <div style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        justifyContent: 'center',
+        padding: '8px 16px',
+        gap: '8px',
+      }}>
+        {/* Top News */}
         <Chip
           selected={selectedCategory === ''}
           onPress={() => handleCategorySelect('')}
-          style={styles.categoryChip}
+          style={[styles.categoryChip, selectedCategory === '' ? styles.webSelectedChip : null]}
           textStyle={selectedCategory === '' ? styles.selectedCategoryText : styles.categoryText}
           mode={selectedCategory === '' ? 'flat' : 'outlined'}
         >
           Top News
         </Chip>
 
-        {/* Categoría General */}
-        <Chip
-          selected={selectedCategory === 'general'}
-          onPress={() => handleCategorySelect('general')}
-          style={styles.categoryChip}
-          textStyle={selectedCategory === 'general' ? styles.selectedCategoryText : styles.categoryText}
-          mode={selectedCategory === 'general' ? 'flat' : 'outlined'}
-        >
-          {NEWS_CATEGORIES.general}
-        </Chip>
-
-        {/* Resto de categorías */}
-        {Object.entries(NEWS_CATEGORIES)
-          .filter(([key]) => key !== 'general')
-          .map(([key, label]) => (
-            <Chip
-              key={key}
-              selected={selectedCategory === key}
-              onPress={() => handleCategorySelect(key)}
-              style={styles.categoryChip}
-              textStyle={selectedCategory === key ? styles.selectedCategoryText : styles.categoryText}
-              mode={selectedCategory === key ? 'flat' : 'outlined'}
-            >
-              {label}
-            </Chip>
-          ))}
-      </ScrollView>
+        {/* Todas las categorías en una fila con wrapping */}
+        {Object.entries(NEWS_CATEGORIES).map(([key, label]) => (
+          <Chip
+            key={key}
+            selected={selectedCategory === key}
+            onPress={() => handleCategorySelect(key)}
+            style={[styles.categoryChip, selectedCategory === key ? styles.webSelectedChip : null]}
+            textStyle={selectedCategory === key ? styles.selectedCategoryText : styles.categoryText}
+            mode={selectedCategory === key ? 'flat' : 'outlined'}
+          >
+            {label}
+          </Chip>
+        ))}
+      </div>
     );
   };
 
+  // Renderizado específico para plataforma web
+  const renderWebView = () => {
+    return (
+      <div style={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100vh',
+        width: '100%',
+        overflow: 'hidden',
+      }}>
+        {/* Header fijo para web - más compacto */}
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          backgroundColor: COLORS.background,
+          zIndex: 1000,
+          boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+        }}>
+          {/* Fila superior: Logo y perfil en línea */}
+          <div style={{
+            display: 'flex',
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            padding: '8px 16px',
+            height: '50px',
+          }}>
+            <Image
+              source={require('../../assets/logo.png')}
+              style={styles.logo}
+              resizeMode="contain"
+            />
+            <TouchableOpacity onPress={goToProfile}>
+              <IconButton
+                icon="account-circle"
+                size={30}
+                color={COLORS.accent}
+              />
+            </TouchableOpacity>
+          </div>
+
+          {/* Fila inferior: Categorías en grid con wrap */}
+          {renderWebCategoryChips()}
+        </div>
+
+        {/* Contenido scrolleable con margen superior reducido */}
+        <div style={{
+          marginTop: 110, // Altura reducida del header
+          overflowY: 'auto',
+          flex: 1,
+          WebkitOverflowScrolling: 'touch',
+          padding: '16px',
+          maxWidth: '1200px', // Limitar ancho máximo en pantallas muy grandes
+          margin: '110px auto 0', // Centrar el contenido
+          width: '100%',
+        }}>
+          {error ? (
+            <View style={styles.errorContainer}>
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
+          ) : loading && news.length === 0 ? (
+            <View style={styles.loaderContainer}>
+              <ActivityIndicator size="large" color={COLORS.accent} />
+            </View>
+          ) : (
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+              gap: '16px'
+            }}>
+              {news.map((item) => (
+                <div key={item?.id || `${item?.title || Math.random()}-${Math.random()}`}>
+                  <NewsCard article={item} />
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Footer */}
+          {(loading || refreshing) && news.length > 0 && (
+            <View style={styles.footerLoader}>
+              <ActivityIndicator color={COLORS.accent} />
+            </View>
+          )}
+
+          {/* Botón de cargar más */}
+          {!loading && !refreshing && hasMoreData && (
+            <TouchableOpacity
+              style={[styles.loadMoreButton, { width: '200px', margin: '20px auto' }]}
+              onPress={handleLoadMore}
+            >
+              <Text style={styles.loadMoreText}>Cargar más noticias</Text>
+            </TouchableOpacity>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // Renderizado del componente principal
   return (
     <View style={styles.container}>
-      {/* Header animado que se muestra/oculta según dirección del scroll */}
-      <Animated.View
-        style={[
-          styles.header,
-          {
-            transform: [{ translateY }],
-          },
-        ]}
-      >
-        <View style={styles.headerContent}>
-          <Image
-            source={require('../../assets/logo.png')}
-            style={styles.logo}
-            resizeMode="contain"
-          />
-          <TouchableOpacity onPress={goToProfile}>
-            <IconButton
-              icon="account-circle"
-              size={30}
-              color={COLORS.accent}
-            />
-          </TouchableOpacity>
-        </View>
-        {/* Selector de categorías */}
-        {renderCategoryChips()}
-      </Animated.View>
-
-      <StatusBar backgroundColor={COLORS.background} barStyle="dark-content" />
-
-      {error ? (
-        <View style={[styles.errorContainer, { marginTop: HEADER_TOTAL_HEIGHT + CATEGORY_BAR_HEIGHT }]}>
-          <Text style={styles.errorText}>{error}</Text>
-        </View>
+      {Platform.OS === 'web' ? (
+        renderWebView()
       ) : (
-        <Animated.FlatList
-          contentContainerStyle={{ paddingTop: HEADER_TOTAL_HEIGHT + CATEGORY_BAR_HEIGHT }}
-          data={news}
-          keyExtractor={(item) => item?.id || `${item?.title || Math.random()}-${Math.random()}`}
-          renderItem={renderItem}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={handleRefresh}
-              colors={[COLORS.accent]}
-              tintColor={COLORS.accent}
-              progressViewOffset={HEADER_TOTAL_HEIGHT + CATEGORY_BAR_HEIGHT}
+        // Versión con animaciones para NATIVO (Android/iOS)
+        <>
+          {/* Header animado que se muestra/oculta según dirección del scroll */}
+          <Animated.View
+            style={[
+              styles.header,
+              {
+                transform: [{ translateY }],
+              },
+            ]}
+          >
+            <View style={styles.headerContent}>
+              <Image
+                source={require('../../assets/logo.png')}
+                style={styles.logo}
+                resizeMode="contain"
+              />
+              <TouchableOpacity onPress={goToProfile}>
+                <IconButton
+                  icon="account-circle"
+                  size={30}
+                  color={COLORS.accent}
+                />
+              </TouchableOpacity>
+            </View>
+            {/* Selector de categorías */}
+            {renderCategoryChips()}
+          </Animated.View>
+
+          <StatusBar backgroundColor={COLORS.background} barStyle="dark-content" />
+
+          {error ? (
+            <View style={[styles.errorContainer, { marginTop: HEADER_TOTAL_HEIGHT + CATEGORY_BAR_HEIGHT }]}>
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
+          ) : (
+            <Animated.FlatList
+              contentContainerStyle={{ paddingTop: HEADER_TOTAL_HEIGHT + CATEGORY_BAR_HEIGHT }}
+              data={news}
+              keyExtractor={(item) => item?.id || `${item?.title || Math.random()}-${Math.random()}`}
+              renderItem={renderItem}
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={handleRefresh}
+                  colors={[COLORS.accent]}
+                  tintColor={COLORS.accent}
+                  progressViewOffset={HEADER_TOTAL_HEIGHT + CATEGORY_BAR_HEIGHT}
+                />
+              }
+              onEndReached={handleLoadMore}
+              onEndReachedThreshold={0.5}
+              ListFooterComponent={loading || refreshing ? renderFooter : null}
+              ListEmptyComponent={ListEmptyComponent}
+              onScroll={handleScroll}
+              scrollEventThrottle={16}
+              removeClippedSubviews={true}
+              maxToRenderPerBatch={8}
+              windowSize={10}
+              updateCellsBatchingPeriod={30}
+              initialNumToRender={6}
             />
-          }
-          onEndReached={handleLoadMore}
-          onEndReachedThreshold={0.5}
-          ListFooterComponent={loading || refreshing ? renderFooter : null}
-          ListEmptyComponent={ListEmptyComponent}
-          onScroll={handleScroll}
-          scrollEventThrottle={16}
-          removeClippedSubviews={true}
-          maxToRenderPerBatch={8}
-          windowSize={10}
-          updateCellsBatchingPeriod={30}
-          initialNumToRender={6}
-        />
+          )}
+        </>
       )}
     </View>
   );
@@ -572,6 +667,41 @@ const styles = StyleSheet.create({
     width: '100%',
     backgroundColor: '#f0f0f0',
     borderRadius: 4,
+  },
+  webHeader: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 1000,
+  },
+  webContainer: {
+    marginTop: HEADER_TOTAL_HEIGHT + CATEGORY_BAR_HEIGHT,
+    flex: 1,
+    overflow: 'auto',
+    height: '100vh',
+    paddingBottom: 16,
+  },
+  webFlatList: {
+    height: '100%',
+    width: '100%',
+  },
+  loadMoreButton: {
+    backgroundColor: COLORS.background,
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginVertical: 16,
+    borderWidth: 1,
+    borderColor: COLORS.accent,
+  },
+  loadMoreText: {
+    color: COLORS.accent,
+    fontWeight: 'bold',
+  },
+  webSelectedChip: {
+    backgroundColor: COLORS.accent + '20', // Color de acento con 20% de opacidad
+    borderColor: COLORS.accent,
   },
 });
 
