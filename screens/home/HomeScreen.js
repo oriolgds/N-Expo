@@ -35,6 +35,9 @@ const HomeScreen = () => {
   const [cachedCategories, setCachedCategories] = useState(new Set());
   const [backgroundLoading, setBackgroundLoading] = useState(false);
 
+  // Nueva referencia para evitar cargas duplicadas
+  const manualCategoryChangeRef = useRef(false);
+
   // Ref para la animación del scroll (solo se usa en móvil)
   const scrollY = useRef(new Animated.Value(0)).current;
   const scrollYClamped = Animated.diffClamp(scrollY, 0, HEADER_TOTAL_HEIGHT + CATEGORY_BAR_HEIGHT);
@@ -245,10 +248,17 @@ const HomeScreen = () => {
 
   // Cargar datos iniciales y configurar suscripción en tiempo real cuando cambia la categoría
   useEffect(() => {
-    // Carga inicial
-    initialLoad();
+    // Verificar si este cambio de categoría fue manual
+    if (manualCategoryChangeRef.current) {
+      // Si fue un cambio manual, no lanzar initialLoad porque ya se cargó en handleCategorySelect
+      manualCategoryChangeRef.current = false;
+      console.log('Omitiendo initialLoad automático después de cambio manual de categoría');
+    } else {
+      // Carga inicial solo cuando no es un cambio manual
+      initialLoad();
+    }
 
-    // Configurar suscripción en tiempo real
+    // Configurar suscripción en tiempo real (esto siempre se ejecuta)
     const unsubscribe = subscribeToNewsUpdates(userRegion, selectedCategory, (updatedData) => {
       if (updatedData && Array.isArray(updatedData.articles)) {
         console.log(`Recibida actualización automática de noticias para categoría: ${selectedCategory || 'general'}`);
@@ -316,12 +326,14 @@ const HomeScreen = () => {
     }
   };
 
-  // Modificar la función handleCategorySelect para aprovechar la caché
+  // Función actualizada para manejar cambio de categoría
   const handleCategorySelect = (category) => {
     // Si ya estamos en esta categoría, no hacer nada o volver a top-news
     if (category === selectedCategory) {
       if (selectedCategory !== '') {
         console.log(`Deseleccionando categoría: ${selectedCategory} -> top-news`);
+        // Marca como cambio manual antes de cambiar la categoría
+        manualCategoryChangeRef.current = true;
         setSelectedCategory('');
       }
       return;
@@ -339,6 +351,9 @@ const HomeScreen = () => {
     // Solo mostrar loader si la categoría no está en caché
     setLoading(!isCached);
     setPage(1);
+
+    // Marcar como cambio manual antes de cambiar la categoría
+    manualCategoryChangeRef.current = true;
     setSelectedCategory(category);
 
     // Hacer una carga inmediata
@@ -355,6 +370,7 @@ const HomeScreen = () => {
     }).catch(error => {
       console.error('Error en cambio de categoría:', error);
       setLoading(false);
+      setError('Error al cargar la categoría');
     });
   };
 

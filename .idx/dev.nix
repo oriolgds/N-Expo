@@ -12,10 +12,15 @@
     # pkgs.nodejs_20
     # pkgs.nodePackages.nodemon
     pkgs.nodejs_latest
+    pkgs.androidsdk
+    pkgs.androidndk
   ];
 
   # Sets environment variables in the workspace
-  env = { };
+  env = {
+    ANDROID_HOME = "${pkgs.androidsdk}";
+    PATH = "${pkgs.androidsdk}/bin:${pkgs.androidndk}/bin:$PATH";
+  };
   idx = {
     # Search for the extensions you want on https://open-vsx.org/ and use "publisher.id"
     extensions = [
@@ -26,6 +31,14 @@
     previews = {
       enable = true;
       previews = {
+        android = {
+          # Ejecuta el emulador de Android con npm run android y muestra la previsualización
+          command = ["npm" "run" "android"];
+          manager = "web";
+          env = {
+            PORT = "$PORT";
+          };
+        };
         # web = {
         #   # Example: run "npm run dev" with PORT set to IDX's defined port for previews,
         #   # and show it in IDX's web preview panel
