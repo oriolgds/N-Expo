@@ -29,8 +29,14 @@ const CACHE_EXPIRY_TIME = 30 * 60 * 1000; // 30 minutos
 const memoryCache = {
     categoryData: {},
     socialData: {},
-    lastUpdate: {}
+    lastUpdate: {},
+    lastAccess: {}, // Nuevo campo para rastrear último acceso
+    categoryPriority: [] // Lista para controlar prioridad de categorías en caché
 };
+
+// Constantes para gestión de caché
+const MAX_CACHED_CATEGORIES = 5; // Máximo de categorías a mantener en memoria
+const MAX_ARTICLES_PER_CATEGORY = 30; // Límite de artículos por categoría
 
 // Categorías de noticias
 export const NEWS_CATEGORIES = {
@@ -277,6 +283,189 @@ export const getTopHeadlinesOptimized = async (country = 'es', category = '', pa
 };
 
 /**
+ * Registra acceso a una categoría y mantiene caché optimizado
+ */
+const trackCategoryAccess = (country, category) => {
+    const cacheKey = `${country}_${category || 'general'}`;
+
+    // Actualizar timestamp de acceso
+    memoryCache.lastAccess[cacheKey] = Date.now();
+
+    // Actualizar lista de prioridad
+    const index = memoryCache.categoryPriority.indexOf(cacheKey);
+    if (index !== -1) {
+        // Si ya existe, quitarlo para ponerlo al principio
+        memoryCache.categoryPriority.splice(index, 1);
+    }
+
+    // Añadir al principio (más reciente)
+    memoryCache.categoryPriority.unshift(cacheKey);
+
+    // Limitar tamaño de caché si es necesario
+    if (memoryCache.categoryPriority.length > MAX_CACHED_CATEGORIES) {
+        // Eliminar categoría menos usada recientemente
+        const oldestKey = memoryCache.categoryPriority.pop();
+        delete memoryCache.categoryData[oldestKey];
+        delete memoryCache.lastUpdate[oldestKey];
+        delete memoryCache.lastAccess[oldestKey];
+        console.log(`🧹 Categoría eliminada de memoria caché: ${oldestKey}`);
+    }
+};
+
+/**
+ * Optimiza array de artículos para caché en memoria
+ */
+const optimizeArticlesForCache = (articles) => {
+    if (!Array.isArray(articles)) return [];
+
+    // Limitar cantidad de artículos
+    const limitedArticles = articles.slice(0, MAX_ARTICLES_PER_CATEGORY);
+
+    // Opcional: eliminar campos innecesarios para ahorrar memoria
+    return limitedArticles.map(article => {
+        // Mantener solo campos esenciales para la vista principal
+        const { id, title, description, url, urlToImage, publishedAt, source, social } = article;
+        return { id, title, description, url, urlToImage, publishedAt, source, social };
+    });
+};
+
+/**
+ * Función especial para cambio rápido entre categorías
+ * Optimizada para minimizar bloqueos de UI y devolver resultados instantáneos
+ */
+export const switchCategoryFast = async (country = 'es', category = '', callback) => {
+    try {
+        const countryCode = country.toLowerCase();
+        const categoryStr = category && category.trim() !== '' ? category.toLowerCase() : 'general';
+        const cacheKey = `${countryCode}_${categoryStr}`;
+
+        // Registrar acceso a esta categoría (para gestión de caché)
+        trackCategoryAccess(countryCode, categoryStr);
+
+        // Variables para control de flujo
+        let returnedData = false;
+
+        // 1. PRIORIDAD MÁXIMA: Verificación de caché en memoria
+        if (memoryCache.categoryData[cacheKey] && memoryCache.categoryData[cacheKey].length > 0) {
+            // Devolver datos inmediatamente desde memoria
+            setTimeout(() => {
+                callback({
+                    status: 'ok',
+                    articles: memoryCache.categoryData[cacheKey],
+                    fromMemoryCache: true,
+                    updating: true
+                });
+            }, 0);
+
+            returnedData = true;
+            console.log(`✅ Cambio rápido a ${categoryStr}: datos devueltos desde memoria`);
+
+            // Actualizar en segundo plano solo si los datos son antiguos
+            // Usar requestIdleCallback en web o setTimeout en móvil para no bloquear UI
+            const cacheTooOld = !memoryCache.lastUpdate[cacheKey] ||
+                (Date.now() - memoryCache.lastUpdate[cacheKey] > 30000);
+
+            if (cacheTooOld) {
+                const updateFunc = () => {
+                    updateCategoryInBackground(countryCode, categoryStr, 1);
+                };
+
+                if (typeof requestIdleCallback === 'function') {
+                    requestIdleCallback(updateFunc, { timeout: 2000 });
+                } else {
+                    setTimeout(updateFunc, 1000);
+                }
+            }
+        }
+
+        // 2. SEGUNDO PASO: Verificar AsyncStorage en paralelo
+        // No esperar a saber si hay datos en memoria para iniciar la búsqueda en AsyncStorage
+        getNewsFromLocalCache(country, category).then(cachedData => {
+            if (cachedData && cachedData.articles && cachedData.articles.length > 0 && !returnedData) {
+                // Retornar datos de AsyncStorage si no hemos enviado nada aún
+                setTimeout(() => {
+                    callback({
+                        status: 'ok',
+                        articles: cachedData.articles,
+                        fromCache: true,
+                        updating: true
+                    });
+                }, 0);
+
+                returnedData = true;
+                console.log(`✅ Cambio rápido a ${categoryStr}: datos devueltos desde AsyncStorage`);
+
+                // Guardar en memoria para futuros accesos rápidos (versión optimizada)
+                memoryCache.categoryData[cacheKey] = optimizeArticlesForCache(cachedData.articles);
+                memoryCache.lastUpdate[cacheKey] = Date.now();
+            }
+        }).catch(error => {
+            console.error('Error accediendo a AsyncStorage:', error);
+        });
+
+        // 3. TERCER PASO: Iniciar fetching de red inmediatamente
+        // No esperamos a que terminen los pasos anteriores
+        setTimeout(() => {
+            fetchFreshHeadlines(countryCode, categoryStr, 1)
+                .then(result => {
+                    if (result && result.status === 'ok' && result.articles) {
+                        // Guardar en caché para futuras solicitudes (versión optimizada)
+                        memoryCache.categoryData[cacheKey] = optimizeArticlesForCache(result.articles);
+                        memoryCache.lastUpdate[cacheKey] = Date.now();
+
+                        // Retornar resultados solo si no hemos devuelto nada aún
+                        if (!returnedData) {
+                            callback(result);
+                            returnedData = true;
+                            console.log(`✅ Cambio rápido a ${categoryStr}: datos devueltos desde red (primera carga)`);
+                        } else {
+                            // Si ya devolvimos datos, solo actualizar la UI con nuevos datos frescos
+                            console.log(`✅ Cambio rápido a ${categoryStr}: actualizando UI con datos frescos`);
+                            callback({
+                                status: 'ok',
+                                articles: result.articles,
+                                updated: true
+                            });
+                        }
+
+                        // Guardar en AsyncStorage para futuras visitas
+                        saveNewsToLocalCache(countryCode, categoryStr, {
+                            articles: result.articles,
+                            totalResults: result.totalResults || result.articles.length,
+                            status: result.status
+                        }).catch(e => console.error('Error guardando caché:', e));
+                    }
+                })
+                .catch(error => {
+                    console.error('Error en fetchFreshHeadlines:', error);
+
+                    // Si aún no hemos retornado nada, usar fallback
+                    if (!returnedData) {
+                        callback(getFallbackResponse());
+                        returnedData = true;
+                    }
+                });
+        }, 10); // Mínimo delay para evitar bloqueo de UI
+
+        // Añadir un último mecanismo de seguridad en caso de que todo lo demás falle
+        const safetyTimeout = setTimeout(() => {
+            if (!returnedData) {
+                console.warn('⚠️ Activando fallback de seguridad para evitar bloqueo');
+                callback(getFallbackResponse());
+                returnedData = true;
+            }
+        }, 5000);
+
+        // Siempre devolver una promesa resuelta para no bloquear
+        return { success: true, message: 'Operación iniciada', safetyTimeoutId: safetyTimeout };
+    } catch (error) {
+        console.error('Error crítico en switchCategoryFast:', error);
+        callback(getFallbackResponse());
+        return { success: false, error };
+    }
+};
+
+/**
  * Actualiza una categoría en segundo plano
  */
 async function updateCategoryInBackground(country, category, page) {
@@ -285,8 +474,8 @@ async function updateCategoryInBackground(country, category, page) {
         const cacheKey = `${country}_${category}`;
 
         if (result && result.articles) {
-            // Actualizar memoria y AsyncStorage
-            memoryCache.categoryData[cacheKey] = result.articles;
+            // Actualizar memoria y AsyncStorage (versión optimizada)
+            memoryCache.categoryData[cacheKey] = optimizeArticlesForCache(result.articles);
             memoryCache.lastUpdate[cacheKey] = Date.now();
 
             await saveNewsToLocalCache(country, category, {

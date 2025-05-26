@@ -11,7 +11,8 @@ import {
   reloadNewsFromFirebase,
   saveNewsToLocalCache,
   getTopHeadlinesOptimized,
-  NEWS_CATEGORIES
+  NEWS_CATEGORIES,
+  switchCategoryFast
 } from '../../services/newsService';
 import NewsCard from '../../components/NewsCard';
 import { COLORS } from '../../styles/theme';
@@ -34,6 +35,8 @@ const HomeScreen = () => {
   const navigation = useNavigation();
   const [cachedCategories, setCachedCategories] = useState(new Set());
   const [backgroundLoading, setBackgroundLoading] = useState(false);
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  const previousCategoryRef = useRef('');
 
   // Nueva referencia para evitar cargas duplicadas
   const manualCategoryChangeRef = useRef(false);
@@ -326,8 +329,8 @@ const HomeScreen = () => {
     }
   };
 
-  // Función actualizada para manejar cambio de categoría
-  const handleCategorySelect = (category) => {
+  // Función optimizada para manejar cambio de categoría
+  const handleCategorySelect = useCallback((category) => {
     // Si ya estamos en esta categoría, no hacer nada o volver a top-news
     if (category === selectedCategory) {
       if (selectedCategory !== '') {
@@ -339,40 +342,78 @@ const HomeScreen = () => {
       return;
     }
 
+    // Guardar la categoría anterior para animaciones o uso posterior
+    previousCategoryRef.current = selectedCategory;
+
     console.log(`Cambiando categoría: ${selectedCategory === '' ? 'top-news' : selectedCategory} -> ${category || 'top-news'}`);
 
     // Verificar si la categoría ya está en caché
     const isCached = cachedCategories.has(category);
     console.log(`Categoría ${category || 'top-news'} ${isCached ? 'encontrada en caché' : 'no está en caché'}`);
 
-    // Limpiar noticias actuales para evitar mostrar contenido incorrecto
-    setNews([]);
-
-    // Solo mostrar loader si la categoría no está en caché
-    setLoading(!isCached);
-    setPage(1);
+    // Indicar que estamos en transición (para mostrar algún indicador visual si es necesario)
+    setIsTransitioning(true);
 
     // Marcar como cambio manual antes de cambiar la categoría
     manualCategoryChangeRef.current = true;
-    setSelectedCategory(category);
 
-    // Hacer una carga inmediata
-    getTopHeadlinesOptimized(userRegion, category).then(response => {
-      if (response && Array.isArray(response.articles)) {
-        setNews(response.articles);
-        setHasMoreData(response.articles.length >= 20);
+    // Cambiar la categoría inmediatamente (no vaciamos las noticias actuales)
+    setSelectedCategory(category);
+    setPage(1);
+
+    // Crear callback para recibir datos de la nueva categoría
+    const categoryDataCallback = (data) => {
+      if (data && Array.isArray(data.articles)) {
+        // Actualizar noticias con los nuevos datos
+        setNews(data.articles);
+        setHasMoreData(data.articles.length >= 20);
         setError(null);
 
         // Marcar la categoría como cargada en caché
         setCachedCategories(prev => new Set(prev).add(category));
+
+        // Solo mostrar loader si es una actualización y no tenemos datos en memoria
+        // Mantenemos el indicador de transición para mostrar algún spinner pequeño
+        if (!data.fromMemoryCache && !data.fromCache) {
+          setLoading(false);
+        }
+
+        // Si es una actualización de datos ya mostrados, no desactivar el estado de transición
+        if (!data.updated && !data.fromCacheWithSocial) {
+          setIsTransitioning(false);
+        }
+      } else {
+        // Error o no hay datos
+        setLoading(false);
+        setIsTransitioning(false);
+        if (!data || !data.articles || data.articles.length === 0) {
+          setError('No hay noticias disponibles para esta categoría');
+        }
       }
-      setLoading(false);
-    }).catch(error => {
-      console.error('Error en cambio de categoría:', error);
-      setLoading(false);
-      setError('Error al cargar la categoría');
-    });
-  };
+    };
+
+    // Usar nuestra nueva función optimizada para cambio rápido entre categorías
+    switchCategoryFast(userRegion, category, categoryDataCallback)
+      .catch(error => {
+        console.error('Error en cambio de categoría:', error);
+        setLoading(false);
+        setIsTransitioning(false);
+        setError('Error al cargar la categoría');
+      });
+
+    // Comenzar a mostrar un loader sutil solo después de un pequeño retraso
+    // para evitar flashes en cambios rápidos entre categorías cacheadas
+    const loadingTimeout = setTimeout(() => {
+      // Verificamos si todavía estamos en transición después de 300ms
+      if (isTransitioning) {
+        // Mostrar un indicador visual pero NO vaciar los datos actuales
+        setLoading(true);
+      }
+    }, 300);
+
+    // Limpiar el timeout si la operación es rápida
+    return () => clearTimeout(loadingTimeout);
+  }, [selectedCategory, userRegion, cachedCategories, setNews, setLoading, setError]);
 
   // Renderizar chips de categorías para dispositivos móviles (con scroll horizontal)
   const renderCategoryChips = () => {
@@ -540,6 +581,27 @@ const HomeScreen = () => {
           margin: `${isWideScreen ? '70px' : '110px'} auto 0`,
           width: '100%',
         }}>
+          {/* Indicador de transición entre categorías */}
+          {isTransitioning && (
+            <div style={{
+              position: 'sticky',
+              top: '0px',
+              backgroundColor: 'rgba(255, 255, 255, 0.8)',
+              padding: '8px 16px',
+              borderRadius: '4px',
+              margin: '-8px -8px 8px -8px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 100,
+              backdropFilter: 'blur(5px)',
+              boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+            }}>
+              <ActivityIndicator size="small" color={COLORS.accent} />
+              <Text style={{ marginLeft: 8, color: COLORS.text }}>Actualizando categoría...</Text>
+            </div>
+          )}
+
           {/* Contenido de noticias */}
           {error ? (
             <View style={styles.errorContainer}>
@@ -805,6 +867,24 @@ const styles = StyleSheet.create({
   webSelectedChip: {
     backgroundColor: COLORS.accent + '20', // Color de acento con 20% de opacidad
     borderColor: COLORS.accent,
+  },
+  transitionIndicator: {
+    position: 'absolute',
+    top: HEADER_TOTAL_HEIGHT + CATEGORY_BAR_HEIGHT + 8,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    padding: 8,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+    elevation: 5,
+  },
+  transitionText: {
+    marginLeft: 8,
+    fontSize: 14,
+    color: COLORS.text,
   },
 });
 
